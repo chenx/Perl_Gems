@@ -3,7 +3,9 @@
 # This perl script downloads all files within domain $url_root to local machine,
 # starting from the page $url_start.
 #
-# Tested in DOS on windows XP, Perl version 5.8.8.
+# Tested in:
+# - DOS on windows XP, Perl version 5.8.8.
+# - Linux
 #
 # Short introduction to crawling in Perl:
 # http://www.cs.utk.edu/cs594ipm/perl/crawltut.html
@@ -11,13 +13,14 @@
 # LWP: http://search.cpan.org/~gaas/libwww-perl-5.805/lib/LWP.pm
 # HTML parser: http://search.cpan.org/dist/HTML-Parser/
 # POSIX: http://search.cpan.org/~rgarcia/perl-5.10.0/ext/POSIX/POSIX.pod
+# Progress bar: http://oreilly.com/pub/h/943
 #
 # @author: Xin Chen
 # @created on: 12/22/2007
-# @last modified: 7/16/2014
+# @last modified: 7/17/2014
 #
 
-use strict;
+use strict; 
 use Time::Local;
 use POSIX; # for floor(), ceil(): http://www.perl.com/doc/FAQs/FAQ/oldfaq-html/Q4.13.html
 use LWP::Simple;
@@ -25,7 +28,12 @@ use LWP::UserAgent;
 use HTTP::Request;
 use HTTP::Response;
 use HTML::LinkExtor;
-use utf8;
+use Encode; # for decode_utf8, in parseLinks().
+$|++;       # Use for printing progress bar in getUrl().
+
+######################################################
+# Definition of global variables.
+######################################################
 
 #
 # Print debug information.
@@ -81,12 +89,12 @@ my @size_queue;
 my $content_size;
 
 #
-# Download plain text files (html, txt, asp, etc.) only.
+# Download text files (html, php, etc.) only.
 #
 my $plain_txt_only = 0;
 
 #
-# Set this to 0 if only download the $url_start page.
+# Set to 0 to download $url_start page only.
 #
 my $test_crawl = 0;
 
@@ -134,10 +142,17 @@ my $OPT_VERSION_L = "--version";
 my $OPT_VERBOSE_S = "-V";
 my $OPT_VERBOSE_L = "--verbose";
 
+#
+# Use by getUrl() function that prints a progress bar.
+#
+my $total_size; # Total size of a file to download.
+my $final_data; # The content of a downloaded file.
 
-#
-# Entry point of this program.
-#
+
+######################################################
+# Entry point of the program
+######################################################
+
 MAIN: if (1) {
   &getOptions();
 
@@ -146,16 +161,17 @@ MAIN: if (1) {
   #
   #$url_root = "http://";
   #$url_start = "http://";
-
+  
   if ($url_root eq "") {
     print ("\nError: url_root is not provided. exit.\n");
     &show_usage();
     exit(0);
   }
+  
+  # url_root should ends with "/".
+  if (! ($url_root =~ /\/$/)) { $url_root .= "/"; }
 
-  if ($url_start eq "") {
-    $url_start = $url_root;
-  }
+  if ($url_start eq "") { $url_start = $url_root; }
 
   open LOGFILE, ">> $0.log";
 
@@ -166,7 +182,6 @@ MAIN: if (1) {
   output ("");
 
   &create_local_repos();
-  #&get_local_root($url_start);
   &get_local_root($url_root);
   &get_site();
 
@@ -175,6 +190,11 @@ MAIN: if (1) {
 
 
 1;
+
+
+######################################################
+# Definition of functions.
+######################################################
 
 
 sub getOptions() {
@@ -215,7 +235,7 @@ sub getOptions() {
 sub show_usage() {
   my $usage = <<"END_USAGE"; 
 
-Usage: perl $0 $OPT_URL_ROOT_S [-shtpyidv]
+Usage: perl $0 $OPT_URL_ROOT_S [-dhiprstuv]
 
   Options (short format):
     -d: debug, print debug information.
@@ -265,6 +285,9 @@ sub show_version() {
 }
 
 
+#
+# Create local repository.
+#
 sub create_local_repos() {
   if (! (-d $local_repos)) { 
     &exec_cmd("mkdir \"$local_repos\"");
@@ -278,22 +301,16 @@ sub create_local_repos() {
 
 
 #
-# This derives from start_url.
-# Even under the same url_root, starting from different start_url,
-# result file set may be different.
+# Local_root derives from url_root.
 #
 sub get_local_root() {
   my ($root) = @_;
   if ($DEBUG) { output ("get_local_root(): root = $root" ); }
   
   if ($root =~ /^http:\/\//i) { $root =~ s/^http:\/\///i; }
-  if ($root =~ /\/$/) { $root =~ s/\/$//; } # remove ending "/" if any.
+  if ($root =~ /\/$/) { $root =~ s/\/$//; } # remove trailing "/" if any.
   
-  #my $idx = rindex($root, "/");
-
   $root =~ s/\//_/g; # replace all "/" with "_".
-  #$root =~ s/\./-/g; # replace all "." with "-".
-  #$root =~ s/\?/-/g; # replace all "?" with "-". For dynamic page.
 
   $local_root = $local_repos . $root;
   if ($DEBUG) 
@@ -306,37 +323,50 @@ sub get_local_root() {
 sub get_site() {
   my ($ss_s, $mm_s, $hh_s) = localtime(time);
   
-  if ($local_root eq "" || $url_root eq "" || $url_start eq "") {
-    output ("params NOT initialized.");
-    exit;
-  }
-
   if (! (-d $local_root)) { 
     #mkdir("$local_root", 0700) || die "cannot create $local_root"; 
     &exec_cmd("mkdir \"$local_root\"");
     if (! (-d $local_root)) { 
-      output("Cannot create local root: $local_root");
-      die(); 
+      output("Abort. Cannot create local root: $local_root");
+      #die(); 
+      return; # return, let program close LOGFILE handle.
     }
     output ("Local root $local_root is created");
     output ("");
   }
 
-  if ( isWantedFile($url_start) ) {
-    #print "::$url_start, $content_type, $content_size\n";
-    @link_queue = (@link_queue, $url_start);
-    @type_queue = (@type_queue, $content_type);
-    @size_queue = (@size_queue, $content_size);
-
-    if ($DEBUG) { output( "add new link: $url_start" ); }
+  if (! isWantedFile($url_start) ) {
+    $url_start .= "/"; # url_start is a directory, not a file.
+    if (! isWantedFile($url_start) ) { 
+      print "Abort. Invalid url_start: $url_start\n";
+      return;
+    }
   }
   
+  #print "::$url_start, $content_type, $content_size\n";
+  @link_queue = (@link_queue, $url_start);
+  @type_queue = (@type_queue, $content_type);
+  @size_queue = (@size_queue, $content_size);
+  
+  &go_get_site();
+  
+  my ($ss_t, $mm_t, $hh_t) = localtime(time);
+  my $sec = ($hh_t - $hh_s) * 3600 + ($mm_t - $mm_s) * 60 + ($ss_t - $ss_s);
+  output ("Total time spent: " . &writeTime($sec) );
+}
+
+
+#
+# Crawl the site, using BFS with a queue.
+#
+sub go_get_site() {
   my $link_queue_len = @link_queue;
   my $link_queue_pt = 0;
   my @new_urls;
   my $msg;
   my $type;
   my $size;
+  my $content_len;
 
   my $browser = LWP::UserAgent->new();
   $browser->timeout(10);
@@ -346,14 +376,18 @@ sub get_site() {
     $type = $type_queue[$link_queue_pt];
     $size = $size_queue[$link_queue_pt];
 
+    # clear left over chars of current row from prevous progress bar.
+    print progress_bar(-1, 0, 0, ''); 
     output( "link #" . (1 + $link_queue_pt) . ": $url" );
-    if ($verbose) {
-      output( "   Type: $type, Size: $size" );
-    }
 
     $contents = &getUrl($url, $browser);
+    $content_len = length($contents);
     
-    if (length($contents) > 0) { # if == 0, then may be "403 Access Forbidden".
+    if ($content_len > 0) { # if == 0, then may be "403 Access Forbidden".
+      if ($verbose) {
+        output( "   Type: $type, Size: " . ($size // $content_len) );
+      }
+    
       &save_content($url, $contents, $type);
       
       @new_urls = &parseLinks($url, $contents, $type);
@@ -365,11 +399,11 @@ sub get_site() {
     $link_queue_pt ++;
   }
   
+  # clear left over chars of current row from prevous progress bar.
+  print progress_bar(-1, 0, 0, ''); 
+
   output ("");
   output ("Total links crawled: $link_queue_len");
-  my ($ss_t, $mm_t, $hh_t) = localtime(time);
-  my $sec = ($hh_t - $hh_s) * 3600 + ($mm_t - $mm_s) * 60 + ($ss_t - $ss_s);
-  output ("Total time spent: " . &writeTime($sec) );
 }
 
 
@@ -385,6 +419,7 @@ sub writeTime() {
 
 #
 # Get html content of an url.
+# This works, but does not use a call_back to draw progress bar.
 #
 # To call, first initiate the $browser variable:
 #   my $browser = LWP::UserAgent->new();
@@ -394,7 +429,7 @@ sub writeTime() {
 # $response->content_type() can be:
 # text/html, image/jpeg, image/gif, application/msword etc.
 #
-sub getUrl() {
+sub getUrl_deprecated() {
   my ($url, $browser) = @_;
   my $request = HTTP::Request->new(GET => $url);
   my $response = $browser->request($request);
@@ -408,6 +443,81 @@ sub getUrl() {
 
 
 #
+# Get html content of an url.
+#
+sub getUrl() {
+  my ($url, $browser) = @_;
+  $final_data = "";
+   
+  my $result = $browser->head($url);
+  my $remote_headers = $result->headers;
+  # Most servers return content-length, but not always.
+  $total_size = $remote_headers->content_length;
+  
+  # now do the downloading.
+  my $response = $browser->get($url, ':content_cb' => \&callback );
+  
+  # Don't clear row here, it's too soon. Clear in function go_get_site().
+  #print progress_bar(-1,01,25,'='); 
+  
+  if ($verbose) { print "\n"; } # Keep the progress bar, if desired.
+  return $final_data; # File content.
+}
+
+
+# per chunk.
+sub callback {
+   my ($data, $response, $protocol) = @_;
+   $final_data .= $data;
+   #print "callback: len = " . length($final_data) . "\n";
+   print progress_bar( length($final_data), $total_size, 25, '=' ); 
+}
+
+
+#
+# Print progress bar.
+# Each time sprintf is printing to the same address, so same location on screen.
+# $got - bytes received so far.
+# $total - total bytes of the file.
+# $width - size of the progress bar: "==..==>"
+# $char  - the '=' char used by the progress bar.
+#
+# Code is modified from: http://oreilly.com/pub/h/943
+#
+# wget-style. routine by tachyon
+# at http://tachyon.perlmonk.org/
+#
+sub progress_bar {
+    my ( $got, $total, $width, $char ) = @_;
+    $width ||= 25; $char ||= '-'; # "||=": default to if not defined.
+    my $num_width = length ($total // "");
+    
+    # Some web servers don't give "content-length" field.
+    # In such case don't print progress bar.
+    if ($num_width == 0) { return; }
+    
+    #print "got = $got, total = $total\n";    
+    if ($got == -1) { 
+      # removes the previous print out. 
+      # 79 is used since in standard console, 1 line has 80 chars.
+      # 79 spaces plus a "\r" is 80 chars.
+      # Besides, this should be enough to cover reasonable file sizes.
+      # e.g. the progress bar below has 64 chars, when file size is 6-digit.
+      # |========================>| Got 100592 bytes of 100592 (100.00%)
+      # So 12 chars are used for file size, 52 chars for the rest bytes.
+      # This gives 79 - 52 = 27 bytes for file size.
+      # File size can be as much as 13 digits, without interrupting the format.
+      sprintf (' ' x 79) . "\r";  
+    }
+    else {
+      sprintf "|%-${width}s| Got %${num_width}s bytes of %s (%.2f%%)\r", 
+        $char x (($width-1)*$got/$total). '>', 
+        $got, $total, 100*$got/+$total;
+    }
+}
+
+
+#
 # $$link[i]: valid values for i: 0 (tag name), 1(attribute name), 2(link value)
 # e.g.: <img src='http://127.0.0.1/index.html'>
 # Here $$link[0] = img, $$link[1] = src, $$link[2] = http://127.0.0.1/index.html
@@ -415,10 +525,13 @@ sub getUrl() {
 sub parseLinks() {
   my ($url, $contents, $type) = @_;
   my ($page_parser) = HTML::LinkExtor->new(undef, $url);
-  #print "parseLinks: type = $type\n";  
-  #if ($type =~ m/utf\-8/i) { $page_parser->parse( utf8::decode($contents) )->eof; }
-  #else 
-  { $page_parser->parse($contents)->eof; }
+
+  # This would have the warning:
+  # "Parsing of undecoded UTF-8 will give garbage when decoding entities".
+  # So use the one with decode_utf8, about same speed.
+  #$page_parser->parse($contents)->eof; 
+  $page_parser->parse(decode_utf8 $contents)->eof;   
+  
   my @links = $page_parser->links;
   my @urls;
 
@@ -433,20 +546,19 @@ sub parseLinks() {
 sub add_new_links() {
   my ($url, @new_links) = @_;
   my $len = @new_links;
-  my $i;
   my $new_link;
-
   #print "add_new_links(): total = $len\n";
 
-  for ($i = 0; $i < $len; $i ++) {
+  for (my $i = 0; $i < $len; $i ++) {
     $new_link = $new_links[$i];
+    
+    # Remove links like "http://a.com/a.html#section_1".
     if ($new_link =~ /#[a-z0-9\-\_\%]*$/i) { 
       $new_link =~ s/#[a-z0-9\-\_\%]*$//i;
     }
 
 	if ( isWantedFile($new_link) ) {
       #print "::$new_link, $content_type, $content_size\n";
-
       @link_queue = (@link_queue, $new_link);
       @type_queue = (@type_queue, $content_type);
       @size_queue = (@size_queue, $content_size);
@@ -463,10 +575,10 @@ sub add_new_links() {
 sub add_image_links() {
   my ($url, @new_links) = @_;
   my $len = @new_links;
-  my $i;
   my $new_link;
   #print "add_new_links(): total = $len\n";
-  for ($i = 0; $i < $len; $i ++) {
+  
+  for (my $i = 0; $i < $len; $i ++) {
     $new_link = $new_links[$i];
 
     if ( isWantedImage($new_link) &&
@@ -496,11 +608,12 @@ sub insideDomain() {
   return 0;
 }
 
+
 sub getFileHeader() {
   my ($link) = @_;
   ($content_type, $content_size) = head($link); # or die "isPlainTxtFile() ERROR $link: $!";
   if ($DEBUG) {
-    #output ("getFileHeader(): Link: $link type: $content_type, size: $content_size");
+    output ("getFileHeader(): Link: $link type: $content_type, size: $content_size");
   }
 }
 
@@ -513,7 +626,6 @@ sub getFileHeader() {
 #
 sub isWantedFile() {
   my ($link) = @_;
-
   if (! &insideDomain($link)) { return 0; } 
   if (&link_crawled($link)) { return 0; }
   if ($static_page_only && $link =~ /\?(\S+=\S*)+$/i) { return 0; }
@@ -530,7 +642,7 @@ sub isWantedFile() {
   #}
 
   # Must use () around the regex expression to get correct precedence.
-  if ($plain_txt_only && ! ($content_type =~ /^text\//)) { return 0; }
+  if ($plain_txt_only && ! (($content_type // "") =~ /^text\//)) { return 0; }
 
   #if ($plain_txt_only) {
     # A third possibility is to test $response->content_type for txt/html
@@ -555,13 +667,6 @@ sub isWantedFile() {
 }
 
 
-# deprecated.
-#sub print_content() {
-#  my ($url, $content) = @_;
-#  print "\n--$url--\n$content\n";
-#  print "HTML length: " . length($content) . "\n\n";
-#}
-
 sub get_mime_type() {
   my ($type) = @_;
   if (($type // "") ne "") {
@@ -575,6 +680,7 @@ sub get_mime_type() {
   return "";
 }
 
+
 sub save_content() {
   my ($url, $content, $type) = @_;
   my $outfile;
@@ -584,30 +690,24 @@ sub save_content() {
   my $localpath = get_local_path($url, $filename);
   #print "save_content(). url=$url, localpath = $localpath\n";
   
+  # This happens for default page under a directory.
+  if ($filename eq "") { $filename = "index_"; }
+  
   if ($filename =~ /\?/) {
     $filename =~ s/\?/-/g; # replace "?" with "-", for dynamic page.
-    # for dynamic page, need to append file suffix.
-    # file suffix is from type.
-    #print "type: $type\n";
     
-    # This happens for a dynamic page, which may be like a.php?x=1&y=2
+    # A dynamic page may be like a.php?x=1&y=2, and has no suffix when save.
+    # In this case, get file suffix from content-type. E.g, save as:
     # This will be saved as a.php-x=1&y=2.html
+    #print "type: $type\n";
     my $t = &get_mime_type($type);
     if ($t ne "") { $filename .= ".$t"; }
-    #if ($type ne "") {
-	#  my @tmp = split(';', $type); # for cases like: "text/html; charset=utf-8"
-	#  my @tmp2 = split('/', $tmp[0]);
-	#  #print "mime type: $tmp2[1]\n";
-	#  if (length(@tmp2 >= 2) && $tmp2[1] ne "") {
-	#    $filename .= "." . $tmp2[1];	  
-    #  }
-	#}
   }
   elsif (! ($filename =~ /\./)) { 
-  # this happens when the file does not have a suffix, 
-  # e.g., when this is the index file under a directory.
-  # then the directory name is used as a file name,
-  # and no directory is created locally.
+    # this happens when the file does not have a suffix, 
+    # e.g., when this is the index file under a directory.
+    # then the directory name is used as a file name,
+    # and no directory is created locally.
     my $t = &get_mime_type($type);
     if ($t ne "") { $filename .= ".$t"; }
   }
@@ -636,7 +736,6 @@ sub save_content() {
 sub exec_cmd() {
   my $cmd = shift;
   output($cmd);
-
   `$cmd`;
 }
 
@@ -655,8 +754,7 @@ sub get_local_path() {
     if ($path =~ /^http:\/\//) { $path =~ s/^http:\/\///; } 
   }
 
-  #print "after remove root: $path\n";
-  #$path =~ s/$filename$//i; # this goes wrong if filename contains "?", for dynamic page.
+  # Remove filename from path.
   $path = substr($path, 0, length($path) - length($filename));
   #print "after remove filename: $path\n";
   if ($path =~ /^\//) { $path =~ s/^\///; }
@@ -684,7 +782,6 @@ sub get_filename() {
   my $filename;
   my $i = rindex($path, "/");
   $filename = substr($path, $i + 1);
-  #$filename =~ s/\?/-/g; # replace all "?" with "-". For dynamic page.
   #if ($DEBUG) { print "get_filename(): url=$path filename=$filename\n"; }
   return $filename;
 }

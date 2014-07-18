@@ -9,7 +9,7 @@ A web crawler in Perl. Stores crawled files locally. Keeps a log file. Useful fo
 
 phttp.pl
 --------
-A HTTP web server in Perl. Runs as a daemon. Default port is 9000. So you can visit http://localhost:9000 after it starts. Similar in function to Apache. Serves static content now, but can be extended to handle dynamic content, e.g., work with Tomcat, php/jsp/asp/asp.net etc.
+A HTTP web server in Perl. Runs as a daemon. Default port is 9000. So you can visit http://localhost:9000 after it starts. Similar to Apache in function, serve static content. Should be easy to extend to handle dynamic content, e.g., work with Tomcat, php/jsp/asp/asp.net etc.
 
 plog.pl
 -------

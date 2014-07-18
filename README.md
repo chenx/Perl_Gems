@@ -5,7 +5,7 @@ Useful Perl Scripts.
 
 pcraw.pl 
 --------
-A web crawler in Perl. Store crawled files locally. Keeps a log file. Useful for downloading a website.
+A web crawler in Perl. Stores crawled files locally. Keeps a log file. Useful for downloading a website.
 
 phttp.pl
 --------
@@ -15,7 +15,7 @@ plog.pl
 -------
 A perl utility to count number of lines in all files with given suffix(es) in a directory and sub-directories recursively.
 
------
+=======
 Author: X. Chen  
 Since: 2014  
 License: Apache/MIT/BSD/GPL

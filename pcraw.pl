@@ -21,14 +21,14 @@
 # Perldoc: http://juerd.nl/site.plp/perlpodtut
 #          http://www.perlmonks.org/?node_id=252477
 #
-# @author: Xin Chen
+# @author: X. Chen
 # @created on: 12/22/2007
 # @last modified: 7/17/2014
 #
 
 
 ######################################################
-# Perldoc 
+# Perldoc
 ######################################################
 
 =head1 NAME 

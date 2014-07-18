@@ -1,5 +1,7 @@
 #!/usr/bin/perl -w
 #
+#1111111112222222222333333333344444444445555555555666666666677777777778888888888
+#
 # This perl script downloads all files within domain $url_root to local machine,
 # starting from the page $url_start.
 #
@@ -13,6 +15,8 @@
 # LWP: http://search.cpan.org/~gaas/libwww-perl-5.805/lib/LWP.pm
 # HTML parser: http://search.cpan.org/dist/HTML-Parser/
 # POSIX: http://search.cpan.org/~rgarcia/perl-5.10.0/ext/POSIX/POSIX.pod
+# POSIX math functions, e.g., floor(), ceil():
+#     http://www.perl.com/doc/FAQs/FAQ/oldfaq-html/Q4.13.html
 # Progress bar: http://oreilly.com/pub/h/943
 #
 # @author: Xin Chen
@@ -21,82 +25,37 @@
 #
 
 use strict; 
-use Time::Local;
-use POSIX; # for floor(), ceil(): http://www.perl.com/doc/FAQs/FAQ/oldfaq-html/Q4.13.html
 use LWP::Simple;
 use LWP::UserAgent;
 use HTTP::Request;
 use HTTP::Response;
 use HTML::LinkExtor;
-use Encode; # for decode_utf8, in parseLinks().
-$|++;       # Use for printing progress bar in getUrl().
+use Time::Local;
+use POSIX;      # for floor(), ceil(): 
+use Encode;     # For decode_utf8, in parseLinks().
+use IO::Handle; # For flushing log file.
+$|++;           # For printing progress bar in getUrl().
+
 
 ######################################################
 # Definition of global variables.
 ######################################################
 
-#
-# Print debug information.
-#
-my $DEBUG = 0;
-
-#
-# Local storage repository directory.
-#
-my $local_repos = "./download/"; 
-
-#
-# Local root directory for a download task.
-# This is obtained from start_url.
-#
-my $local_root = ""; 
-
-#
-# Only files under this root will be downloaded.
-#
-my $url_root = "";
-
-#
-# Where the crawling starts from.
-#
-my $url_start = "";
-
-#
-# File url.
-#
-my $url = ""; 
-
-#
-# File contents
-#
-my $contents;
-
-#
-# Store links already crawled.
-#
-my @link_queue;
-
-#
-# Store type of the files.
-#
-my @type_queue;
-my $content_type;
-
-#
-# Store size of the files.
-#
-my @size_queue;
-my $content_size;
-
-#
-# Download text files (html, php, etc.) only.
-#
-my $plain_txt_only = 0;
-
-#
-# Set to 0 to download $url_start page only.
-#
-my $test_crawl = 0;
+my $DEBUG = 0;          # Print debug information.
+my $local_repos = "./download/"; # Local storage repository directory.
+my $local_root = "";    # Local root directory for a download task.
+my $url_root = "";      # Only files under this root will be downloaded.
+my $url_start = "";     # Where the crawling starts from.
+my $url = "";           # File url.
+my $contents;           # File contents
+my @link_queue;         # Store links already crawled.
+my @type_queue;         # Store content type of the files.
+my $content_type;       # Content type of a file.
+my @size_queue;         # Store content size of the files.
+my $content_size;       # Content size of a file.
+my $plain_txt_only = 0; # Download text files (html, php, etc.) only.
+my $test_crawl = 0;     # Set to 0 to download $url_start page only.
+my $verbose = 0;        # If 1, print more details to screen and log.
 
 #
 # Some images are not in the directory of $url_root. 
@@ -113,10 +72,6 @@ my $get_outside_image = 0;
 #
 my $static_page_only = 0;
 
-#
-# If 1, print more details to screen and log.
-#
-my $verbose = 0;
 
 #
 # For command line options.
@@ -181,8 +136,6 @@ MAIN: if (1) {
   output ("url_start: $url_start");
   output ("");
 
-  &create_local_repos();
-  &get_local_root($url_root);
   &get_site();
 
   close LOGFILE;
@@ -322,14 +275,15 @@ sub get_local_root() {
 
 sub get_site() {
   my ($ss_s, $mm_s, $hh_s) = localtime(time);
-  
+
+  &create_local_repos(); # create local repository, if not exist.
+  &get_local_root($url_root); # create local root for this task.
+
   if (! (-d $local_root)) { 
-    #mkdir("$local_root", 0700) || die "cannot create $local_root"; 
     &exec_cmd("mkdir \"$local_root\"");
     if (! (-d $local_root)) { 
       output("Abort. Cannot create local root: $local_root");
-      #die(); 
-      return; # return, let program close LOGFILE handle.
+      return; # return instead of die(), to close LOGFILE handle.
     }
     output ("Local root $local_root is created");
     output ("");
@@ -390,9 +344,12 @@ sub go_get_site() {
     
       &save_content($url, $contents, $type);
       
+      print progress_bar(-1, 0, 0, ''); 
+      print "parsing links, please wait..\r";
       @new_urls = &parseLinks($url, $contents, $type);
-      if (! $test_crawl) { &add_new_links($url, @new_urls); } # add links within $url_root only.
-      if ($get_outside_image) { &add_image_links($url, @new_urls); } # get all images.
+      
+      if (! $test_crawl) { &add_new_links($url, @new_urls); } 
+      if ($get_outside_image) { &add_image_links($url, @new_urls); } 
     }
 
     $link_queue_len = @link_queue;
@@ -505,8 +462,8 @@ sub progress_bar {
       # e.g. the progress bar below has 64 chars, when file size is 6-digit.
       # |========================>| Got 100592 bytes of 100592 (100.00%)
       # So 12 chars are used for file size, 52 chars for the rest bytes.
-      # This gives 79 - 52 = 27 bytes for file size.
-      # File size can be as much as 13 digits, without interrupting the format.
+      # This gives 79 - 52 = 27 bytes for file size, so file size
+      # can be up to 13 digits without interrupting the format.
       sprintf (' ' x 79) . "\r";  
     }
     else {
@@ -536,7 +493,8 @@ sub parseLinks() {
   my @urls;
 
   foreach my $link (@links) {
-    #print "$$link[0]\t $$link[1]\t $$link[2]\t \n";   
+    #print "$$link[0]\t $$link[1]\t $$link[2]\t \r";
+    #print substr($$link[2], 0, 50) . " ...\r";
     @urls = (@urls, $$link[2]);
   }
   return @urls;
@@ -611,11 +569,12 @@ sub insideDomain() {
 
 sub getFileHeader() {
   my ($link) = @_;
-  ($content_type, $content_size) = head($link); # or die "isPlainTxtFile() ERROR $link: $!";
+  ($content_type, $content_size) = head($link); 
   if ($DEBUG) {
-    output ("getFileHeader(): Link: $link type: $content_type, size: $content_size");
+    output ("getFileHeader(): $link type: $content_type, size: $content_size");
   }
 }
+
 
 #
 # Generally there are txt/html files, image files,
@@ -643,25 +602,6 @@ sub isWantedFile() {
 
   # Must use () around the regex expression to get correct precedence.
   if ($plain_txt_only && ! (($content_type // "") =~ /^text\//)) { return 0; }
-
-  #if ($plain_txt_only) {
-    # A third possibility is to test $response->content_type for txt/html
-    # in getURL, but that needs to download the file first.
-    # The best way may be to get the header of a file only and 
-    # check it for content_type.
-  #  if ($link =~ /\.jpg$/i) { return 1; }
-  #  if ($link =~ /\.gif$/i) { return 1; }
-  #  if ($link =~ /\.png$/i) { return 1; }
-  #  if ($link =~ /\.bmp$/i) { return 1; }
-  #  if ($link =~ /\.tiff$/i) { return 1; }
-  #  if ($link =~ /\.doc$/i) { return 1; }
-  #  if ($link =~ /\.pdf$/i) { return 1; }
-  #  if ($link =~ /\.ps$/i) { return 1; }
-
-  #  if ($link =~ /\.wav$/i) { return 1; }
-  #  if ($link =~ /\.mp3$/i) { return 1; }
-  #  if ($link =~ /\.midi$/i) { return 1; }
-  #}
 
   return 1;
 }
@@ -717,7 +657,8 @@ sub save_content() {
   
   if ($DEBUG) { output ("save content to: $outfile"); }
 
-  # this happens when the url ends with "/", and the file to save is the default under this.
+  # this happens when the url ends with "/", 
+  # and the file to save is the default under this.
   # for example, index.html or default.html.
   if ($outfile =~ /\/$/) {
       $outfile = $outfile . "index_.html";
@@ -728,7 +669,7 @@ sub save_content() {
     print OUTFILE $content;
     close OUTFILE;
   } else {
-    output ("save_content() error: cannot open local file to save to: $outfile");
+    output ("save_content() error: cannot open file to save to: $outfile");
   }
 }
 
@@ -747,7 +688,9 @@ sub exec_cmd() {
 sub get_local_path() {
   my ($path, $filename) = @_;
   my $pattern = "$url_root";
-  if ($DEBUG) { print "get_local_path(): remote path=$path, filename=$filename\n"; }
+  if ($DEBUG) { 
+    print "get_local_path(): remote path=$path, filename=$filename\n"; 
+  }
   if ($path =~ /^$pattern/i) {
     $path =~ s/^$pattern//i;
   } else { # not under the same $url_root.
@@ -791,6 +734,11 @@ sub output {
   my ($msg) = @_;
 
   print "$msg\n";
+  
+  # Log for every change by flush log file handle.
+  # If log in batch mode, may lose intermediate 
+  # information when the program process is killed.
   print LOGFILE (localtime(time) . " $msg\n");
+  LOGFILE->autoflush;
 }
 

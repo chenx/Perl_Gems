@@ -124,6 +124,7 @@ my $content_size;       # Content size of a file.
 my $plain_txt_only = 0; # Download text files (html, php, etc.) only.
 my $test_crawl = 0;     # Set to 0 to download $url_start page only.
 my $verbose = 0;        # If 1, print more details to screen and log.
+my $download_size = 0;  # Total size of downloaded files. In Bytes.
 
 #
 # Some images are not in the directory of $url_root. 
@@ -228,21 +229,45 @@ sub getOptions() {
 
     my $a = $ARGV[$i];
 
-    if ($a eq $OPT_URL_ROOT_S || $a eq $OPT_URL_ROOT_L) { $state = $OPT_URL_ROOT_S; }
-    elsif ($a eq $OPT_URL_START_S || $a eq $OPT_START_URL_L) { $state = $OPT_URL_START_S; }
+    if ($a eq $OPT_URL_ROOT_S || $a eq $OPT_URL_ROOT_L) {
+      $state = $OPT_URL_ROOT_S; 
+    }    
+    elsif ($a eq $OPT_URL_START_S || $a eq $OPT_START_URL_L) {
+      $state = $OPT_URL_START_S; 
+    }
+    
+    elsif ($a eq $OPT_TEST_S || $a eq $OPT_TEST_L) {
+      $test_crawl = 1; $state = ""; 
+    }    
+    elsif ($a eq $OPT_PLAIN_TXT_ONLY_S || $a eq $OPT_PLAIN_TXT_ONLY_L) {
+      $plain_txt_only = 1; $state = ""; 
+    }    
+    elsif ($a eq $OPT_STATIC_ONLY_S || $a eq $OPT_STATIC_ONLY_L) {
+      $static_page_only = 1; $state = ""; 
+    }    
+    elsif ($a eq $OPT_OUTSIDE_IMAGE_S || $a eq $OPT_OUTSIDE_IMAGE_L) {
+      $get_outside_image = 1; $state = ""; 
+    }
+    elsif ($a eq $OPT_DEBUG_S || $a eq $OPT_DEBUG_L) {
+      $DEBUG = 1; $state = ""; 
+    }
+    elsif ($a eq $OPT_VERBOSE_S || $a eq $OPT_VERBOSE_L) {
+      $verbose = 1; $state = ""; 
+    }
 
-    elsif ($a eq $OPT_TEST_S || $a eq $OPT_TEST_L) { $test_crawl = 1; $state = ""; }
-    elsif ($a eq $OPT_PLAIN_TXT_ONLY_S || $a eq $OPT_PLAIN_TXT_ONLY_L) { $plain_txt_only = 1; $state = ""; }
-    elsif ($a eq $OPT_STATIC_ONLY_S || $a eq $OPT_STATIC_ONLY_L) { $static_page_only = 1; $state = ""; }
-    elsif ($a eq $OPT_OUTSIDE_IMAGE_S || $a eq $OPT_OUTSIDE_IMAGE_L) { $get_outside_image = 1; $state = ""; }
-    elsif ($a eq $OPT_DEBUG_S || $a eq $OPT_DEBUG_L) { $DEBUG = 1; $state = ""; }
-    elsif ($a eq $OPT_VERBOSE_S || $a eq $OPT_VERBOSE_L) { $verbose = 1; $state = ""; }
+    elsif ($a eq $OPT_VERSION_S || $a eq $OPT_VERSION_L) {
+      &show_version(); exit(0); 
+    }
+    elsif ($a eq $OPT_HELP_S || $a eq $OPT_HELP_L) {
+      &show_usage(); exit(0); 
+    }
 
-    elsif ($a eq $OPT_VERSION_S || $a eq $OPT_VERSION_L) { &show_version(); exit(0); }
-    elsif ($a eq $OPT_HELP_S || $a eq $OPT_HELP_L) { &show_usage(); exit(0); }
-
-    elsif ($state eq $OPT_URL_ROOT_S) { $url_root = $a; $state = ""; }
-    elsif ($state eq $OPT_URL_START_S) { $url_start = $a; $state = ""; }
+    elsif ($state eq $OPT_URL_ROOT_S) {
+      $url_root = $a; $state = ""; 
+    }
+    elsif ($state eq $OPT_URL_START_S) {
+      $url_start = $a; $state = ""; 
+    }
 
     else { 
       print "Warning: unknown option $a\n";
@@ -407,6 +432,8 @@ sub go_get_site() {
   my $browser = LWP::UserAgent->new();
   $browser->timeout(10);
 
+  $download_size = 0;
+  
   while ($link_queue_pt < $link_queue_len) {
     $url = $link_queue[$link_queue_pt];
     $type = $type_queue[$link_queue_pt];
@@ -423,6 +450,7 @@ sub go_get_site() {
       if ($verbose) {
         output( "   Type: $type, Size: " . ($size // $content_len) );
       }
+      $download_size += $content_len;
     
       &save_content($url, $contents, $type);
       
@@ -442,7 +470,24 @@ sub go_get_site() {
   print progress_bar(-1, 0, 0, ''); 
 
   output ("");
-  output ("Total links crawled: $link_queue_len");
+  output ("Total links crawled: $link_queue_len");  
+  output ("Total download size: $download_size bytes, or " 
+          . get_download_size());
+}
+
+
+sub get_download_size() {
+  my $size;
+  if ($download_size < 1000000) { # less than 1 MB.
+    $size = sprintf("%.3f", $download_size/1024) . " KB";
+  }
+  elsif ($download_size < 1000000000) { # less than 1 GB.
+    $size = sprintf("%.3f", $download_size/1024/2014) . " MB";
+  }
+  else {
+    $size = sprintf("%.3f", $download_size/1024/2014/1024) . " GB";
+  }
+  return $size;
 }
 
 

@@ -452,7 +452,7 @@ sub go_get_site() {
       $download_size += $content_len;
     
       &save_content($url, $contents, $type);
-      
+
       print progress_bar(-1, 0, 0, ''); 
       print "parsing links, please wait..\r";
       @new_urls = &parseLinks($url, $contents, $type);
@@ -573,32 +573,32 @@ sub callback {
 # at http://tachyon.perlmonk.org/
 #
 sub progress_bar {
-    my ( $got, $total, $width, $char ) = @_;
-    $width ||= 25; $char ||= '-'; # "||=": default to if not defined.
-    my $num_width = length ($total // "");
+  my ( $got, $total, $width, $char ) = @_;
+  $width ||= 25; $char ||= '-'; # "||=": default to if not defined.
+  my $num_width = length ($total // "");
     
-    # Some web servers don't give "content-length" field.
-    # In such case don't print progress bar.
-    if ($num_width == 0) { return; }
+  # Some web servers don't give "content-length" field.
+  # In such case don't print progress bar.
+  if ($num_width == 0) { return; }
     
-    #print "got = $got, total = $total\n";    
-    if ($got == -1) { 
-      # removes the previous print out. 
-      # 79 is used since in standard console, 1 line has 80 chars.
-      # 79 spaces plus a "\r" is 80 chars.
-      # Besides, this should be enough to cover reasonable file sizes.
-      # e.g. the progress bar below has 64 chars, when file size is 6-digit.
-      # |========================>| Got 100592 bytes of 100592 (100.00%)
-      # So 12 chars are used for file size, 52 chars for the rest bytes.
-      # This gives 79 - 52 = 27 bytes for file size, so file size
-      # can be up to 13 digits without interrupting the format.
-      sprintf (' ' x 79) . "\r";  
-    }
-    else {
-      sprintf "|%-${width}s| Got %${num_width}s bytes of %s (%.2f%%)\r", 
-        $char x (($width-1)*$got/$total). '>', 
-        $got, $total, 100*$got/+$total;
-    }
+  #print "got = $got, total = $total\n";    
+  if ($got == -1) { 
+    # removes the previous print out. 
+    # 79 is used since in standard console, 1 line has 80 chars.
+    # 79 spaces plus a "\r" is 80 chars.
+    # Besides, this should be enough to cover reasonable file sizes.
+    # e.g. the progress bar below has 64 chars, when file size is 6-digit.
+    # |========================>| Got 100592 bytes of 100592 (100.00%)
+    # So 12 chars are used for file size, 52 chars for the rest bytes.
+    # This gives 79 - 52 = 27 bytes for file size, so file size
+    # can be up to 13 digits without interrupting the format.
+    sprintf (' ' x 79) . "\r";  
+  }
+  else {
+    sprintf "|%-${width}s| Got %${num_width}s bytes of %s (%.2f%%)\r", 
+      $char x (($width-1)*$got/$total). '>', 
+      $got, $total, 100*$got/+$total;
+  }
 }
 
 
@@ -643,8 +643,8 @@ sub add_new_links() {
       $new_link =~ s/#[a-z0-9\-\_\%]*$//i;
     }
 
-	if ( isWantedFile($new_link) ) {
-      #print "::$new_link, $content_type, $content_size\n";
+    if ( isWantedFile($new_link) ) {
+      #print "::$new_link, $content_type, $content_size\n"; 
       @link_queue = (@link_queue, $new_link);
       @type_queue = (@type_queue, $content_type);
       @size_queue = (@size_queue, $content_size);
@@ -670,13 +670,15 @@ sub add_image_links() {
     if ( isWantedImage($new_link) &&
          (! link_exists($new_link)) ) {
       @link_queue = (@link_queue, $new_link);
+      @type_queue = (@type_queue, $content_type);
+      @size_queue = (@size_queue, $content_size);
       if ($DEBUG) { output( "add new link: $new_link" ); }
     }
   }
 }
 
 
-sub link_crawled() {
+sub link_is_crawled() {
   my ($new_link) = @_;
   my $len = @link_queue;
   my $i;
@@ -714,7 +716,7 @@ sub getFileHeader() {
 sub isWantedFile() {
   my ($link) = @_;
   if (! &insideDomain($link)) { return 0; } 
-  if (&link_crawled($link)) { return 0; }
+  if (&link_is_crawled($link)) { return 0; }
   if ($static_page_only && $link =~ /\?(\S+=\S*)+$/i) { return 0; }
 
   &getFileHeader($link);

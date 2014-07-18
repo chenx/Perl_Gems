@@ -25,7 +25,7 @@ use LWP::UserAgent;
 use HTTP::Request;
 use HTTP::Response;
 use HTML::LinkExtor;
-
+use utf8;
 
 #
 # Print debug information.
@@ -138,40 +138,39 @@ my $OPT_VERBOSE_L = "--verbose";
 #
 # Entry point of this program.
 #
-MAIN: {
-  if (1) {
-    &getOptions();
+MAIN: if (1) {
+  &getOptions();
 
-    #
-    # In case you want to hard-code the urls, un-comment lines below.
-    #
-    #$url_root = "http://";
-    #$url_start = "http://";
+  #
+  # In case you want to hard-code the urls, un-comment lines below.
+  #
+  #$url_root = "http://";
+  #$url_start = "http://";
 
-    if ($url_root eq "") {
-      print ("\nError: url_root is not provided. exit.\n");
-      &show_usage();
-      exit(0);
-    }
-
-    if ($url_start eq "") {
-      $url_start = $url_root;
-    }
-
-    open LOGFILE, ">> $0.log";
-
-    output ("");
-    output ("===== Perl Web Crawler started =====");
-    output ("url_root:  $url_root");
-    output ("url_start: $url_start");
-    output ("");
-
-    &create_local_repos();
-    &get_local_root($url_start);
-    &get_site();
-
-    close LOGFILE;
+  if ($url_root eq "") {
+    print ("\nError: url_root is not provided. exit.\n");
+    &show_usage();
+    exit(0);
   }
+
+  if ($url_start eq "") {
+    $url_start = $url_root;
+  }
+
+  open LOGFILE, ">> $0.log";
+
+  output ("");
+  output ("===== Perl Web Crawler started =====");
+  output ("url_root:  $url_root");
+  output ("url_start: $url_start");
+  output ("");
+
+  &create_local_repos();
+  #&get_local_root($url_start);
+  &get_local_root($url_root);
+  &get_site();
+
+  close LOGFILE;
 }
 
 
@@ -288,11 +287,13 @@ sub get_local_root() {
   if ($DEBUG) { output ("get_local_root(): root = $root" ); }
   
   if ($root =~ /^http:\/\//i) { $root =~ s/^http:\/\///i; }
-  if ($root =~ /\/$/) { $root =~ s/\/$//; }
+  if ($root =~ /\/$/) { $root =~ s/\/$//; } # remove ending "/" if any.
+  
+  #my $idx = rindex($root, "/");
 
   $root =~ s/\//_/g; # replace all "/" with "_".
-  $root =~ s/\./-/g; # replace all "." with "-".
-  $root =~ s/\?/-/g; # replace all "?" with "-". For dynamic page.
+  #$root =~ s/\./-/g; # replace all "." with "-".
+  #$root =~ s/\?/-/g; # replace all "?" with "-". For dynamic page.
 
   $local_root = $local_repos . $root;
   if ($DEBUG) 
@@ -353,9 +354,9 @@ sub get_site() {
     $contents = &getUrl($url, $browser);
     
     if (length($contents) > 0) { # if == 0, then may be "403 Access Forbidden".
-      &save_content($url, $contents);
+      &save_content($url, $contents, $type);
       
-      @new_urls = &parseLinks($url, $contents);
+      @new_urls = &parseLinks($url, $contents, $type);
       if (! $test_crawl) { &add_new_links($url, @new_urls); } # add links within $url_root only.
       if ($get_outside_image) { &add_image_links($url, @new_urls); } # get all images.
     }
@@ -412,9 +413,12 @@ sub getUrl() {
 # Here $$link[0] = img, $$link[1] = src, $$link[2] = http://127.0.0.1/index.html
 #
 sub parseLinks() {
-  my ($url, $contents) = @_;
+  my ($url, $contents, $type) = @_;
   my ($page_parser) = HTML::LinkExtor->new(undef, $url);
-  $page_parser->parse($contents)->eof;
+  #print "parseLinks: type = $type\n";  
+  #if ($type =~ m/utf\-8/i) { $page_parser->parse( utf8::decode($contents) )->eof; }
+  #else 
+  { $page_parser->parse($contents)->eof; }
   my @links = $page_parser->links;
   my @urls;
 
@@ -516,10 +520,14 @@ sub isWantedFile() {
 
   &getFileHeader($link);
 
-  if ($content_type eq "") { # || $content_size eq "") { # content_size is null for dynamic pages.
-    output("$link: Empty file. Do not download.");
-    return 0; 
-  }
+  # content_size is null for dynamic pages.
+  # content_type may be null, "//" operator is "defined or".
+  # both of these 2 may be undefined, but the file still can be downloaded,
+  # e.g., for case when ".." is involved, like http://abc.com/../xyz.html
+  #if ( ($content_type // "") eq "") { # || $content_size eq "") { 
+  #  output("$link: Empty file. Do not download.");
+  #  return 0; 
+  #}
 
   # Must use () around the regex expression to get correct precedence.
   if ($plain_txt_only && ! ($content_type =~ /^text\//)) { return 0; }
@@ -554,15 +562,56 @@ sub isWantedFile() {
 #  print "HTML length: " . length($content) . "\n\n";
 #}
 
+sub get_mime_type() {
+  my ($type) = @_;
+  if (($type // "") ne "") {
+    my @tmp = split(';', $type); # for cases like: "text/html; charset=utf-8"
+    my @tmp2 = split('/', $tmp[0]);
+    #print "mime type: $tmp2[1]\n";
+    if (length(@tmp2 >= 2) && $tmp2[1] ne "") {
+      return $tmp2[1];	  
+    }
+  }
+  return "";
+}
 
 sub save_content() {
-  my ($url, $content) = @_;
+  my ($url, $content, $type) = @_;
   my $outfile;
   
   my $filename = get_filename($url);
+  #print "save_content(). filename = $filename\n"  ;
   my $localpath = get_local_path($url, $filename);
-
+  #print "save_content(). url=$url, localpath = $localpath\n";
   
+  if ($filename =~ /\?/) {
+    $filename =~ s/\?/-/g; # replace "?" with "-", for dynamic page.
+    # for dynamic page, need to append file suffix.
+    # file suffix is from type.
+    #print "type: $type\n";
+    
+    # This happens for a dynamic page, which may be like a.php?x=1&y=2
+    # This will be saved as a.php-x=1&y=2.html
+    my $t = &get_mime_type($type);
+    if ($t ne "") { $filename .= ".$t"; }
+    #if ($type ne "") {
+	#  my @tmp = split(';', $type); # for cases like: "text/html; charset=utf-8"
+	#  my @tmp2 = split('/', $tmp[0]);
+	#  #print "mime type: $tmp2[1]\n";
+	#  if (length(@tmp2 >= 2) && $tmp2[1] ne "") {
+	#    $filename .= "." . $tmp2[1];	  
+    #  }
+	#}
+  }
+  elsif (! ($filename =~ /\./)) { 
+  # this happens when the file does not have a suffix, 
+  # e.g., when this is the index file under a directory.
+  # then the directory name is used as a file name,
+  # and no directory is created locally.
+    my $t = &get_mime_type($type);
+    if ($t ne "") { $filename .= ".$t"; }
+  }
+
   if ($localpath =~ /\/$/) { $outfile = "$localpath$filename"; }
   else { $outfile = "$localpath/$filename"; }  
   
@@ -599,7 +648,7 @@ sub exec_cmd() {
 sub get_local_path() {
   my ($path, $filename) = @_;
   my $pattern = "$url_root";
-  #if ($DEBUG) { print "get_local_path(): remote path=$path, filename=$filename\n"; }
+  if ($DEBUG) { print "get_local_path(): remote path=$path, filename=$filename\n"; }
   if ($path =~ /^$pattern/i) {
     $path =~ s/^$pattern//i;
   } else { # not under the same $url_root.
@@ -607,14 +656,15 @@ sub get_local_path() {
   }
 
   #print "after remove root: $path\n";
-  $path =~ s/$filename$//i;
+  #$path =~ s/$filename$//i; # this goes wrong if filename contains "?", for dynamic page.
+  $path = substr($path, 0, length($path) - length($filename));
   #print "after remove filename: $path\n";
   if ($path =~ /^\//) { $path =~ s/^\///; }
     
   if ($local_root =~ /\/$/) { $path = "$local_root$path"; }
   else {$path = "$local_root/$path"; }
     
-  #if($DEBUG) { print "get_local_path(): local dir=$path\n"; }
+  if($DEBUG) { print "get_local_path(): local dir=$path\n"; }
   if (! (-d $path)) {
     #mkdir ($path, 0700);
     &exec_cmd("mkdir \"$path\"");

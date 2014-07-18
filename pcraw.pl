@@ -482,10 +482,10 @@ sub get_download_size() {
     $size = sprintf("%.3f", $download_size/1024) . " KB";
   }
   elsif ($download_size < 1000000000) { # less than 1 GB.
-    $size = sprintf("%.3f", $download_size/1024/2014) . " MB";
+    $size = sprintf("%.3f", $download_size/1024/1024) . " MB";
   }
   else {
-    $size = sprintf("%.3f", $download_size/1024/2014/1024) . " GB";
+    $size = sprintf("%.3f", $download_size/1024/1024/1024) . " GB";
   }
   return $size;
 }

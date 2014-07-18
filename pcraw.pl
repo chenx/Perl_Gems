@@ -5,8 +5,8 @@
 # This perl script downloads all files within domain $url_root to local machine,
 # starting from the page $url_start.
 #
-# Tested in:
-# - DOS on windows XP, Perl version 5.8.8.
+# Tested on:
+# - Windows, Perl version 5.8.8.
 # - Linux
 #
 # Short introduction to crawling in Perl:
@@ -18,11 +18,78 @@
 # POSIX math functions, e.g., floor(), ceil():
 #     http://www.perl.com/doc/FAQs/FAQ/oldfaq-html/Q4.13.html
 # Progress bar: http://oreilly.com/pub/h/943
+# Perldoc: http://juerd.nl/site.plp/perlpodtut
+#          http://www.perlmonks.org/?node_id=252477
 #
 # @author: Xin Chen
 # @created on: 12/22/2007
 # @last modified: 7/17/2014
 #
+
+
+######################################################
+# Perldoc 
+######################################################
+
+=head1 NAME 
+
+XC_Crawler. Script name is pcraw.pl
+
+=head1 DESCRIPTION
+
+XC_Crawler is a perl script to crawl the web.
+
+When used for the first time, it creates a local repository 
+./download/ under the same directory. 
+For each download task, a sub directory derived from the url_root 
+(see below) will be created, and all downloads are stored there. 
+A log file pcraw.log will be created under the same directory.
+
+For each download task, at least 2 parameters are needed:
+
+1) url_root. Only files under this url will be downloaded.
+The avoids crawling through the entire web. The user must provide this.
+This can be provided using the -r switch.
+
+2) url_start. This is the url where the crawling starts from. 
+If its value is not provided, it uses url_root as its value.
+This can be provided using the -u switch.
+
+=head1 SYNOPSIS
+
+Usage: perl pcraw [-dhiprstuv]
+
+For more help on usage, type: perl pcraw -h 
+
+=head1 LICENSE
+
+APACHE/MIT/BSD/GPL 2.0
+
+=head1 AUTHOR
+
+=over 
+
+=item 
+X. Chen <chenx@hawaii.edu>
+
+=item 
+Copyrighted (c) since July, 2014
+
+=back
+
+=cut
+
+
+######################################################
+# Package name.
+######################################################
+
+package XC_Crawler;
+
+
+######################################################
+# Include packages.
+######################################################
 
 use strict; 
 use LWP::Simple;
@@ -34,6 +101,7 @@ use Time::Local;
 use POSIX;      # for floor(), ceil(): 
 use Encode;     # For decode_utf8, in parseLinks().
 use IO::Handle; # For flushing log file.
+use Data::Dumper;
 $|++;           # For printing progress bar in getUrl().
 
 
@@ -125,17 +193,16 @@ MAIN: if (1) {
   
   # url_root should ends with "/".
   if (! ($url_root =~ /\/$/)) { $url_root .= "/"; }
-
   if ($url_start eq "") { $url_start = $url_root; }
 
-  open LOGFILE, ">> $0.log";
+  my $log = get_log_name();
+  open LOGFILE, ">> $log";
 
   output ("");
   output ("===== Perl Web Crawler started =====");
   output ("url_root:  $url_root");
   output ("url_start: $url_start");
   output ("");
-
   &get_site();
 
   close LOGFILE;
@@ -227,6 +294,8 @@ Usage: perl $0 $OPT_URL_ROOT_S [-dhiprstuv]
     perl $0 --url-root http://g.com 
     perl $0 --url-root http://g.com --url-start http://g.com/
     perl $0 -h
+    
+  Type "Perldoc $0" to see perldoc message.
 END_USAGE
 
   print $usage;
@@ -235,6 +304,19 @@ END_USAGE
 
 sub show_version() {
   print "\n$0 version 1.0\n";
+}
+
+#
+# Log file name is obtained by
+# replacing the ".pl" suffix with ".log".
+#
+sub get_log_name() {
+  my $log = $0;
+  if ($log =~ /\.pl/i) {
+    $log =~ s/\.pl/\.log/i;
+  }
+  print "---------$log\n";
+  return $log;
 }
 
 
@@ -408,6 +490,8 @@ sub getUrl() {
    
   my $result = $browser->head($url);
   my $remote_headers = $result->headers;
+  if ($DEBUG) { print "getUrl(): " . Dumper($remote_headers); }
+  
   # Most servers return content-length, but not always.
   $total_size = $remote_headers->content_length;
   

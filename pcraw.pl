@@ -98,11 +98,11 @@ use HTTP::Request;
 use HTTP::Response;
 use HTML::LinkExtor;
 use Time::Local;
-use POSIX;      # for floor(), ceil(): 
-use Encode;     # For decode_utf8, in parseLinks().
-use IO::Handle; # For flushing log file.
-use Data::Dumper;
-$|++;           # For printing progress bar in getUrl().
+use POSIX;        # for floor(), ceil(): 
+use Encode;       # For decode_utf8, in parseLinks().
+use IO::Handle;   # For flushing log file.
+use Data::Dumper; # To print remote_headers in getUrl().
+$|++;             # For printing progress bar in getUrl().
 
 
 ######################################################
@@ -196,7 +196,7 @@ MAIN: if (1) {
   if (! ($url_root =~ /\/$/)) { $url_root .= "/"; }
   if ($url_start eq "") { $url_start = $url_root; }
 
-  my $log = get_log_name();
+  my $log = &get_log_name();
   open LOGFILE, ">> $log";
 
   output ("");
@@ -340,7 +340,6 @@ sub get_log_name() {
   if ($log =~ /\.pl/i) {
     $log =~ s/\.pl/\.log/i;
   }
-  print "---------$log\n";
   return $log;
 }
 

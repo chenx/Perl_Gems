@@ -248,6 +248,9 @@ MAIN: if (1) {
 ######################################################
 
 
+#
+# Get command line option switch values.
+#
 sub getOptions() {
   my $ARGV_LEN = @ARGV;
   my $state = "";
@@ -334,6 +337,9 @@ sub getOptions() {
 }
 
 
+#
+# Convert a string to a positive integer.
+#
 sub getPosInt() {
   my ($n) = @_;
   $n = 0 + $n; # convert string to integer.
@@ -342,6 +348,9 @@ sub getPosInt() {
 }
 
 
+#
+# Help message of this program.
+#
 sub showUsage() {
   my $usage = <<"END_USAGE"; 
 
@@ -411,9 +420,13 @@ END_USAGE
 }
 
 
+#
+# Version information of this program.
+#
 sub showVersion() {
   print "\n$0 version 1.0\n";
 }
+
 
 #
 # Log file name is obtained by
@@ -463,6 +476,9 @@ sub getLocalRoot() {
 }
 
 
+#
+# Start to crawl from the url_start website.
+# 
 sub getSite() {
   my ($ss_s, $mm_s, $hh_s) = localtime(time);
 
@@ -587,10 +603,13 @@ sub doGetSite() {
   }
   
   &clearProgressBar();
-  writeSummary($link_queue_pt);
+  &writeSummary($link_queue_pt);
 }
 
 
+#
+# Write download summary.
+#
 sub writeSummary() {
   my ($links_crawled) =@_;
   my $link_queue_len = @link_queue;
@@ -682,7 +701,9 @@ sub getUrl() {
 }
 
 
-# per chunk.
+#
+# Call per chunk. To update progress bar.
+#
 sub callback {
    my ($data, $response, $protocol) = @_;
    $final_data .= $data;
@@ -769,27 +790,27 @@ sub parseLinks() {
 }
 
 
+#
+# Return 1 if the link has been crawled.
+# 
 sub linkIsCrawled() {
   my ($new_link) = @_;
-  #my $len = @link_queue;
-  #my $i;
-  #for ($i = 0; $i < $len; $i ++) {
-  #  if ($new_link eq $link_queue[$i]) { return 1; }
-  #}
-
+  
   foreach my $link (@link_queue) {
     if ($new_link eq $link) { return 1; }
   }
-  
+ 
   foreach my $link (@non_link_queue) {
     if ($new_link eq $link) { return 1; }
   }
   
-  #print "link NOT exist: $new_link\n";
   return 0;
 }
 
 
+#
+# Returns 1 if the link is under url_root.
+#
 sub isInsideDomain() {
   my ($link) = @_;
   if ($link =~ /^$url_root/i) { return 1; }
@@ -797,6 +818,9 @@ sub isInsideDomain() {
 }
 
 
+#
+# Get file type and size.
+# 
 sub getFileHeader() {
   my ($link) = @_;
   ($content_type, $content_size) = head($link); 
@@ -847,6 +871,9 @@ sub isWantedFile() {
 }
 
 
+#
+# Get a file's mime sub type.
+# 
 sub getMimeSubType() {
   my ($type) = @_;
   if (($type // "") ne "") {
@@ -861,6 +888,9 @@ sub getMimeSubType() {
 }
 
 
+#
+# Get the hex code of a mime type.
+# 
 sub getMimeTypeCode() {
   my ($mime) = @_;
   $mime = lc($mime);
@@ -901,6 +931,9 @@ sub fileSizeMatch() {
 }
 
 
+#
+# Save a file to local root.
+# 
 sub saveContent() {
   my ($url, $content, $content_type, $content_len) = @_;
   my $outfile;
@@ -956,6 +989,9 @@ sub saveContent() {
 }
 
 
+#
+# Execute a command and record it in output() function.
+#
 sub execCmd() {
   my $cmd = shift;
   output($cmd);
@@ -999,7 +1035,7 @@ sub getLocalPath() {
 
 
 #
-# extract filename from the url.
+# Extract filename from the url.
 # Need to remove suffix including "?.." and "#..".
 #
 sub getFilename() {
@@ -1012,6 +1048,9 @@ sub getFilename() {
 }
 
 
+#
+# Print to both STDOUT and log file.
+#
 sub output {
   my ($msg) = @_;
 

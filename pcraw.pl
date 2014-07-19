@@ -304,7 +304,7 @@ sub getOptions() {
     }
     elsif ($a eq $OPT_FLAT_PATH_S || $a eq $OPT_FLAT_PATH_L) {
       $flat_localpath = 1; $state = "";
-	}
+    }
 
     elsif ($a eq $OPT_VERSION_S || $a eq $OPT_VERSION_L) {
       &showVersion(); exit(0); 
@@ -1033,7 +1033,7 @@ sub resolveConflictName() {
   my $ct = 1;
   while (my $file =readdir(DIR)) {
     if ($file =~ m/^$filename\_\((\d+)\)$suffix$/) { 
-	  #print "match: $file\n";
+      #print "match: $file\n";
       if ($ct < $1) { $ct = $1; } 
     };
     #print "$file, ct = $ct\n";

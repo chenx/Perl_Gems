@@ -507,7 +507,7 @@ sub getSite() {
   @link_queue = (@link_queue, $url_start);
   @non_link_queue = ();
   
-  &doGetSite();
+  &doCrawl();
   
   my ($ss_t, $mm_t, $hh_t) = localtime(time);
   my $sec = ($hh_t - $hh_s) * 3600 + ($mm_t - $mm_s) * 60 + ($ss_t - $ss_s);
@@ -537,7 +537,7 @@ sub getSite() {
 # For text files, even if mime type is not wanted, the 
 # contents have to be crawled to retrieve links.
 #
-sub doGetSite() {
+sub doCrawl() {
   my $link_queue_len = @link_queue; 
   my $link_queue_pt = 0;
   my $resource_download_ct = 0;
@@ -692,7 +692,7 @@ sub getUrl() {
   # now do the downloading.
   my $response = $browser->get($url, ':content_cb' => \&callback );
   
-  # Don't clear row here, it's too soon. Clear in function doGetSite().
+  # Don't clear row here, it's too soon. Clear in function doCrawl().
   #print progressBar(-1,01,25,'='); 
   
   # Keep the progress bar, if desired.
@@ -1072,7 +1072,7 @@ sub output {
 ######################################################
 #
 # 7/18/2014 
-# - Changed doGetSite(). 
+# - Changed doCrawl(). 
 #   Now put non-text files to @non_link_queue, and won't be crawled.
 #   Text files are stored in @link_queue.
 # - Added mime type constraint.

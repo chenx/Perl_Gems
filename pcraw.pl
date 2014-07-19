@@ -384,11 +384,11 @@ Usage: perl $0 $OPT_URL_ROOT_S <url_root> [-dfhmoprstuv]
         Used when files are stored outside the url_root.
     -p: only download plain text files: html, txt, asp, etc. 
         Binary files are ignored.
-    -r <url_root>: url_root, need to follow with url_root value. 
-        Only files under this path are downloaded. Except when -i is used.
+    -r <url_root>: root url.
+        Only files under this path are downloaded. Except when -o is used.
     -s: only download static pages. 
-        Pages with url parameters like http://a.php?a=b are ignored.
-    -u <url_start>: url_start, need to follow with url_start value.
+        Dynamic pages with parameters like http://a.php?a=b are ignored.
+    -u <url_start>: start url.
         This is where a crawling task starts from.
     -v: show version information.
     -w: wait time before crawl next page, in second.
@@ -413,8 +413,8 @@ Usage: perl $0 $OPT_URL_ROOT_S <url_root> [-dfhmoprstuv]
   -r or --url-root : url_root is needed, and must be provided.
   -u or --url-start: url_start, when not provided, use url_root as default.
   
-  If an url contains special characters, like space of '&', then should
-  enclose the url with double quotes on command line.
+  If an url contains special characters, like space or '&', then
+  it should be enclosed with double quotes to work.
 
   Examples:
     perl $0 -h

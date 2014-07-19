@@ -1160,8 +1160,8 @@ sub output {
 # - Added mime type constraint.
 # - Added file min/max size constraint.
 # - Added wait interval before crawl next page.
+# - Change $test_crawl to $crawl_number, and change switch from -t to -n.
 # - Change $crawl_number from on/off to number of links to crawl.
-# - Change $crawl_number switch from -t to -n.
 # - Added support for flat local path: -f.
 # - For flat local path, allow resolve filename conflict:
 #   rename from file.txt to file_(2).txt, file_(3) etc.

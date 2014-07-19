@@ -502,10 +502,11 @@ sub getSite() {
 # Crawl the site, using BFS with a queue. Procedure is:
 #
 # foreach $url in @link_queue {
+#   download $url;
 #   $content := contents of $url;
 #   @urls := all urls in $content;
 #   foreach $link in @urls {
-#     if (file $link contains more links) {
+#     if (file $link is of text type, i.e., may contain links) {
 #       add $link to @link_queue;
 #     }
 #     else {

@@ -319,11 +319,11 @@ sub getOptions() {
       $wait_interval = getPosInt($a); $state = "";
     }
     elsif ($state eq $OPT_MIN_SIZE_L) {
-	  $file_min_size = getPosInt($a); $state = "";    
-	}
+      $file_min_size = getPosInt($a); $state = "";    
+    }
     elsif ($state eq $OPT_MAX_SIZE_L) {
-	  $file_max_size = getPosInt($a); $state = "";    
-	}
+      $file_max_size = getPosInt($a); $state = "";    
+    }
 
     else { 
       print "Warning: unknown option $a\n";
@@ -457,7 +457,7 @@ sub getLocalRoot() {
   $local_root = $local_repos . $root;
   if ($DEBUG) 
   { 
-	output ("getLocalRoot(): local_root = $root" ); 
+    output ("getLocalRoot(): local_root = $root" ); 
   }
 }
 
@@ -551,32 +551,32 @@ sub doGetSite() {
     print "parsing links, please wait..\r";
     my @new_urls = &parseLinks($url, $contents);
 
-    foreach my $new_link (@new_urls) {
+    foreach my $new_url (@new_urls) {
       # Remove link anchor like in "http://a.com/a.html#section_1".
-      if ($new_link =~ /#[a-z0-9\-\_\%]*$/i) { 
-        $new_link =~ s/#[a-z0-9\-\_\%]*$//i;
+      if ($new_url =~ /#[a-z0-9\-\_\%]*$/i) { 
+        $new_url =~ s/#[a-z0-9\-\_\%]*$//i;
       }
-		
-      if ( isWantedFile($new_link) ) {
+        
+      if ( isWantedFile($new_url) ) {
         #print "::$new_link, $content_type, $content_size\n"; 
         if ($content_type =~ /^text/i || $content_type eq "") {
           #print "add to link Q\n";
-          @link_queue = (@link_queue, $new_link);
+          @link_queue = (@link_queue, $new_url);
         }
         elsif ( &mimeTypeMatch($content_type) && 
             &fileSizeMatch($content_size) )  { # size: from getFileHeader().
           #print "add to non-link Q, and save\n";
           $resource_download_ct += 1;
-          output ("file #$resource_download_ct: $new_link");
-          @non_link_queue = (@non_link_queue, $new_link);
-          my $content = &getUrl($new_link, $browser);            
+          output ("file #$resource_download_ct: $new_url");
+          @non_link_queue = (@non_link_queue, $new_url);
+          my $content = &getUrl($new_url, $browser);            
           my $content_len = length($content);
-          &saveContent($new_link, $content, $content_type, $content_len);
+          &saveContent($new_url, $content, $content_type, $content_len);
           &clearProgressBar();
         }
       }
-	  else {
-	    #print "NOT wanted link, disgard: $new_link\n";    
+      else {
+        #print "NOT wanted link, disgard: $new_link\n";    
       }
     } 
 
@@ -828,7 +828,7 @@ sub isWantedFile() {
   if ($plain_txt_only && ! ($content_type =~ /^text\//i)) { return 0; }
 
   if (! &isInsideDomain($link)) { 
-	if ($get_outside_image && ($content_type =~ /^image/i)) { return 1; }
+    if ($get_outside_image && ($content_type =~ /^image/i)) { return 1; }
     return 0; 
   } 
 
@@ -852,7 +852,7 @@ sub getMimeSubType() {
     my @tmp2 = split('/', $tmp[0]);
     #print "mime type: $tmp2[1]\n";
     if (length(@tmp2 >= 2) && $tmp2[1] ne "") {
-      return $tmp2[1];	  
+      return $tmp2[1];      
     }
   }
   return "";

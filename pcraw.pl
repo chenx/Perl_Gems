@@ -130,12 +130,12 @@ my $file_max_size = 0;  # Max file size to download. 0 means infinite.
 my $wait_interval = 1;  # Wait time (seconds) before crawl next page. Be nice.
 
 #
-# Some images are not in the directory of $url_root. 
+# Some non-text files (such as images) are not under $url_root. 
 # E.g., we want to download files in http://site/people/, 
 # but the displayed images are stored in http://site/images/, 
 # then set this to 1 if those should be downloaded also.
 #
-my $get_outside_image = 0;
+my $get_outside_file = 0;
 
 #
 # Dynamic pages are like: http://site/page.asp?a=b
@@ -181,8 +181,8 @@ my $OPT_PLAIN_TXT_ONLY_S = "-p";
 my $OPT_PLAIN_TXT_ONLY_L = "--plain-txt-only";
 my $OPT_STATIC_ONLY_S = "-s";
 my $OPT_STATIC_ONLY_L = "--static-only";
-my $OPT_OUTSIDE_IMAGE_S = "-i";
-my $OPT_OUTSIDE_IMAGE_L = "--include-image-outside";
+my $OPT_OUTSIDE_FILE_S = "-o";
+my $OPT_OUTSIDE_FILE_L = "--outside-file-include";
 my $OPT_DEBUG_S = "-d";
 my $OPT_DEBUG_L = "--debug";
 my $OPT_VERSION_S = "-v";
@@ -290,8 +290,8 @@ sub getOptions() {
     elsif ($a eq $OPT_STATIC_ONLY_S || $a eq $OPT_STATIC_ONLY_L) {
       $static_page_only = 1; $state = ""; 
     }    
-    elsif ($a eq $OPT_OUTSIDE_IMAGE_S || $a eq $OPT_OUTSIDE_IMAGE_L) {
-      $get_outside_image = 1; $state = ""; 
+    elsif ($a eq $OPT_OUTSIDE_FILE_S || $a eq $OPT_OUTSIDE_FILE_L) {
+      $get_outside_file = 1; $state = ""; 
     }
     elsif ($a eq $OPT_DEBUG_S || $a eq $OPT_DEBUG_L) {
       $DEBUG = 1; $state = ""; 
@@ -359,8 +359,6 @@ Usage: perl $0 $OPT_URL_ROOT_S <url_root> [-dhiprstuv]
   Options (short format):
     -d: debug, print debug information.
     -h: print this help message.
-    -i: download images outside the url_root.
-        Used when images are stored outside the url_root.
     -m: file mime type. Only files with given mime types are downloaded.
         text - 0x1
         image - 0x2
@@ -374,6 +372,8 @@ Usage: perl $0 $OPT_URL_ROOT_S <url_root> [-dhiprstuv]
         application/vnd - 0x200
         application/x - 0x400
         Refer to: http://en.wikipedia.org/wiki/Internet_media_type
+    -o: download non-text files outside the url_root.
+        Used when files are stored outside the url_root.
     -p: only download plain text files: html, txt, asp, etc. 
         Binary files are ignored.
     -r <url_root>: url_root, need to follow with url_root value. 
@@ -391,8 +391,8 @@ Usage: perl $0 $OPT_URL_ROOT_S <url_root> [-dhiprstuv]
     --min-size: min file size to download, in bytes.
     --max-size: max file size to download, in bytes. 0 means infinite.
     --help: same as -h
-    --include-image-outside: same as -i
     --mime_type: same as -m
+    --outside-file-include: same as -o
     --plain-txt-only: same as -p
     --static-only: same as -s
     --test: same as -t
@@ -854,7 +854,7 @@ sub isWantedFile() {
   if ($plain_txt_only && ! ($content_type =~ /^text\//i)) { return 0; }
 
   if (! &isInsideDomain($link)) { 
-    if ($get_outside_image && ($content_type =~ /^image/i)) { return 1; }
+    if ($get_outside_file && ! ($content_type =~ /^text/i)) { return 1; }
     return 0; 
   } 
 

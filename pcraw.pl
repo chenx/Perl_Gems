@@ -58,7 +58,7 @@ This can be provided using the -u switch.
 
 =head1 SYNOPSIS
 
-Usage: perl pcraw [-dhiprstuv]
+Usage: perl pcraw [-dfhmoprstuv]
 
 For more help on usage, type: perl pcraw -h 
 
@@ -122,12 +122,13 @@ my $content_type;       # Content type of a file.
 my $content_size;       # Content size of a file.
 my @non_link_queue;     # Stores links that do not contain urls, e.g., images.
 my $plain_txt_only = 0; # Download text files (html, php, etc.) only.
-my $test_crawl = 0;     # Number of pages to crawl. 0 means infinite.
+my $crawl_number = 0;   # Number of pages to crawl. 0 means infinite.
 my $verbose = 0;        # If 1, print more details to screen and log.
 my $download_bytes;     # Total bytes of downloaded files.
 my $file_min_size = 0;  # Min file size to download.
 my $file_max_size = 0;  # Max file size to download. 0 means infinite.
 my $wait_interval = 1;  # Wait time (seconds) before crawl next page. Be nice.
+my $flat_localpath = 0; # Use only one level of sub-directory locally.
 
 #
 # Some non-text files (such as images) are not under $url_root. 
@@ -175,8 +176,8 @@ my $OPT_URL_START_S = "-u";
 my $OPT_START_URL_L = "--url-start";
 my $OPT_HELP_S = "-h";
 my $OPT_HELP_L = "--help";
-my $OPT_TEST_S = "-t";
-my $OPT_TEST_L = "--test";
+my $OPT_CRAWL_NUMBER_S = "-n";
+my $OPT_CRAWL_NUMBER_L = "--number-crawl";
 my $OPT_PLAIN_TXT_ONLY_S = "-p";
 my $OPT_PLAIN_TXT_ONLY_L = "--plain-txt-only";
 my $OPT_STATIC_ONLY_S = "-s";
@@ -195,6 +196,8 @@ my $OPT_WAIT_INTERVAL_S = "-w";
 my $OPT_WAIT_INTERVAL_L = "--wait";
 my $OPT_MIN_SIZE_L  = "--min-size";
 my $OPT_MAX_SIZE_L  = "--max-size";
+my $OPT_FLAT_PATH_S = "-f";
+my $OPT_FLAT_PATH_L = "--flat-localpath";
 
 #
 # Use by getUrl() function that prints a progress bar.
@@ -281,8 +284,8 @@ sub getOptions() {
       $state = $OPT_MAX_SIZE_L;
     }
     
-    elsif ($a eq $OPT_TEST_S || $a eq $OPT_TEST_L) {
-      $test_crawl = 1; $state = $OPT_TEST_S; 
+    elsif ($a eq $OPT_CRAWL_NUMBER_S || $a eq $OPT_CRAWL_NUMBER_L) {
+      $crawl_number = 1; $state = $OPT_CRAWL_NUMBER_S; 
     }    
     elsif ($a eq $OPT_PLAIN_TXT_ONLY_S || $a eq $OPT_PLAIN_TXT_ONLY_L) {
       $plain_txt_only = 1; $state = ""; 
@@ -299,6 +302,9 @@ sub getOptions() {
     elsif ($a eq $OPT_VERBOSE_S || $a eq $OPT_VERBOSE_L) {
       $verbose = 1; $state = ""; 
     }
+    elsif ($a eq $OPT_FLAT_PATH_S || $a eq $OPT_FLAT_PATH_L) {
+      $flat_localpath = 1; $state = "";
+	}
 
     elsif ($a eq $OPT_VERSION_S || $a eq $OPT_VERSION_L) {
       &showVersion(); exit(0); 
@@ -313,8 +319,8 @@ sub getOptions() {
     elsif ($state eq $OPT_URL_START_S) {
       $url_start = $a; $state = ""; 
     }
-    elsif ($state eq $OPT_TEST_S) { # max links to crawl.
-      $test_crawl = getPosInt($a); $state = ""; 
+    elsif ($state eq $OPT_CRAWL_NUMBER_S) { # max links to crawl.
+      $crawl_number = getPosInt($a); $state = ""; 
     }
     elsif ($state eq $OPT_MIME_TYPE_S) {
       $download_mime_type = getPosInt($a); $state = "";
@@ -354,10 +360,11 @@ sub getPosInt() {
 sub showUsage() {
   my $usage = <<"END_USAGE"; 
 
-Usage: perl $0 $OPT_URL_ROOT_S <url_root> [-dhiprstuv]
+Usage: perl $0 $OPT_URL_ROOT_S <url_root> [-dfhmoprstuv]
 
   Options (short format):
     -d: debug, print debug information.
+    -f: use flat local path: only one level under local root.
     -h: print this help message.
     -m: file mime type. Only files with given mime types are downloaded.
         text - 0x1
@@ -372,6 +379,7 @@ Usage: perl $0 $OPT_URL_ROOT_S <url_root> [-dhiprstuv]
         application/vnd - 0x200
         application/x - 0x400
         Refer to: http://en.wikipedia.org/wiki/Internet_media_type
+    -n <number_of_links>: the number of links to crawl. 0 means inifinite.
     -o: download non-text files outside the url_root.
         Used when files are stored outside the url_root.
     -p: only download plain text files: html, txt, asp, etc. 
@@ -380,7 +388,6 @@ Usage: perl $0 $OPT_URL_ROOT_S <url_root> [-dhiprstuv]
         Only files under this path are downloaded. Except when -i is used.
     -s: only download static pages. 
         Pages with url parameters like http://a.php?a=b are ignored.
-    -t <number_of_links>: the number of links to crawl. 0 means inifinite.
     -u <url_start>: url_start, need to follow with url_start value.
         This is where a crawling task starts from.
     -v: show version information.
@@ -388,14 +395,15 @@ Usage: perl $0 $OPT_URL_ROOT_S <url_root> [-dhiprstuv]
 
   Options (long format):
     --debug: same as -d
-    --min-size: min file size to download, in bytes.
-    --max-size: max file size to download, in bytes. 0 means infinite.
+    --flat-localpath: same as -f
     --help: same as -h
     --mime_type: same as -m
+    --min-size: min file size to download, in bytes.
+    --max-size: max file size to download, in bytes. 0 means infinite.
+    --number-crawl: same as -t
     --outside-file-include: same as -o
     --plain-txt-only: same as -p
     --static-only: same as -s
-    --test: same as -t
     --url-root: same as -r
     --url_start: same as -u
     --version: same as -v
@@ -404,13 +412,17 @@ Usage: perl $0 $OPT_URL_ROOT_S <url_root> [-dhiprstuv]
   The most important options are:
   -r or --url-root : url_root is needed, and must be provided.
   -u or --url-start: url_start, when not provided, use url_root as default.
+  
+  If an url contains special characters, like space of '&', then should
+  enclose the url with double quotes on command line.
 
   Examples:
-    perl $0 -r http://g.com 
-    perl $0 -r http://g.com -u http://g.com/about.html
-    perl $0 --url-root http://g.com 
-    perl $0 --url-root http://g.com --url-start http://g.com/
     perl $0 -h
+    perl $0 -r http://a.com 
+    perl $0 -r http://a.com -u http://a.com/about.html
+    perl $0 --url-root http://a.com 
+    perl $0 --url-root http://a.com --url-start http://a.com/
+    perl $0 --url-root http://a.com -n 1 -m 2 -o -f --min-size 30000
     
   To see perldoc document, type: perldoc $0
   
@@ -546,8 +558,8 @@ sub doCrawl() {
   $download_bytes = 0;  # Initialize total download size.
   
   while ($link_queue_pt < $link_queue_len) {
-    # For testing, only get first $test_crawl number of links.
-    if ($test_crawl > 0 && $link_queue_pt >= $test_crawl) { last; } 
+    # For testing, only get first $crawl_number number of links.
+    if ($crawl_number > 0 && $link_queue_pt >= $crawl_number) { last; } 
     sleep($wait_interval);
 
     $url = $link_queue[$link_queue_pt];
@@ -576,7 +588,7 @@ sub doCrawl() {
       }
         
       if ( isWantedFile($new_url) ) {
-        #print "::$new_link, $content_type, $content_size\n"; 
+        #print "::$new_url, $content_type, $content_size\n"; 
         if ($content_type =~ /^text/i || $content_type eq "") {
           #print "add to link Q\n";
           @link_queue = (@link_queue, $new_url);
@@ -820,10 +832,14 @@ sub isInsideDomain() {
 
 #
 # Get file type and size.
+#
+# If content_size is not defined, let size be 1, so download 
+# can happen and decide the actual size of the file.
 # 
 sub getFileHeader() {
   my ($link) = @_;
   ($content_type, $content_size) = head($link); 
+  $content_size ||= 1; # if not defined, let size be 1.
   if ($DEBUG) {
     output ("getFileHeader(): $link type: $content_type, size: $content_size");
   }
@@ -945,11 +961,12 @@ sub saveContent() {
   my $filename = getFilename($url);
   #print "saveContent(). filename = $filename\n"  ;
   my $localpath = getLocalPath($url, $filename);
+  &createPath($localpath);
   #print "saveContent(). url=$url, localpath = $localpath\n";
   
   # This happens for default page under a directory.
   if ($filename eq "") { $filename = "index_"; }
-  
+    
   if ($filename =~ /\?/) {
     $filename =~ s/\?/-/g; # replace "?" with "-", for dynamic page.
     
@@ -979,6 +996,11 @@ sub saveContent() {
   
   if ($DEBUG) { output ("save content to: $outfile"); }
   
+  if ($flat_localpath && -e $outfile) {
+    #print "this file already exists: $outfile, need new name\n";
+    $outfile = &resolveConflictName($outfile);
+  }
+  
   if (open OUTFILE, "> $outfile") {
     binmode(OUTFILE);
     print OUTFILE $content;
@@ -986,6 +1008,53 @@ sub saveContent() {
   } else {
     output ("saveContent() error: cannot open file to save to: $outfile");
   }
+}
+
+
+#
+# When flat_localpath is used, files from different directory may
+# have name conflict, then rename the conflict file. E.g.,
+# from file.txt to file_(2).txt, and file_(3).txt etc.
+#
+sub resolveConflictName() {
+  my ($outfile) = @_;
+  
+  my $filename = getFilename($outfile);
+  my $outpath = $outfile;
+  $outpath =~ s/$filename$//;
+  my $suffix = getFileSuffix($filename);
+  $filename =~ s/$suffix$//;
+  # $outfile is now split to 3 parts: path, name, suffix. 
+  #print "outfile: $outfile\n";
+  #print "outpath: $outpath, filename: $filename, suffix: $suffix\n";
+  
+  my $dir = $local_root; # Use this since $flat_localpath is used.
+  opendir(DIR, $dir);
+  my $ct = 1;
+  while (my $file =readdir(DIR)) {
+    if ($file =~ m/^$filename\_\((\d+)\)$suffix$/) { 
+	  #print "match: $file\n";
+      if ($ct < $1) { $ct = $1; } 
+    };
+    #print "$file, ct = $ct\n";
+  }
+  closedir(DIR);
+  
+  $ct ++;  
+  $outfile = "$outpath$filename\_($ct)$suffix";
+  #print "new name: $outfile\n";
+  return $outfile;
+}
+
+
+#
+# Get suffix path of a filename.
+#
+sub getFileSuffix() {
+  my ($file) = @_;
+  my $i = rindex($file, ".");
+  my $suffix = substr($file, $i);
+  return $suffix;
 }
 
 
@@ -1005,6 +1074,8 @@ sub execCmd() {
 #
 sub getLocalPath() {
   my ($path, $filename) = @_;
+  if ($flat_localpath) { return $local_root; } # Use flat path.
+  
   my $pattern = "$url_root";
   if ($DEBUG) { 
     print "getLocalPath(): remote path=$path, filename=$filename\n"; 
@@ -1023,16 +1094,27 @@ sub getLocalPath() {
   if ($local_root =~ /\/$/) { $path = "$local_root$path"; }
   else {$path = "$local_root/$path"; }
     
+  # path name (in windows) cannot be any of: \/:*?"<>|
+  # replace these with "-", e.g., for port number: http://a.com:8080.
+  # \ and / don't have to be included, since they are url delimiter too.
+  if ($path =~ m/[\:\*\?\"\<\>\|]/) {
+    $path =~ s/[\:\*\?\"\<\>\|]/-/g; 
+  }  
+  
   if($DEBUG) { print "getLocalPath(): local dir=$path\n"; }
-  if (! (-d $path)) {
-    #mkdir ($path, 0700);
-    &execCmd("mkdir \"$path\"");
-    #if ($DEBUG) { print "create local directory: $path\n"; }
-  }
 
   return $path;
 }
 
+
+sub createPath() {
+  my ($path) = @_;
+  if (! (-d $path)) {
+    #mkdir ($path, 0700);
+    &execCmd("mkdir \"$path\"");
+    #if ($DEBUG) { print "create directory: $path\n"; }
+  }  
+}
 
 #
 # Extract filename from the url.
@@ -1078,7 +1160,11 @@ sub output {
 # - Added mime type constraint.
 # - Added file min/max size constraint.
 # - Added wait interval before crawl next page.
-# - Change $test_crawl from on/off to number of links to crawl.
+# - Change $crawl_number from on/off to number of links to crawl.
+# - Change $crawl_number switch from -t to -n.
+# - Added support for flat local path: -f.
+# - For flat local path, allow resolve filename conflict:
+#   rename from file.txt to file_(2).txt, file_(3) etc.
 #
 # 7/17/2014
 # - Added perldoc message.

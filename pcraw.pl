@@ -861,6 +861,7 @@ sub getMimeSubType() {
 
 sub getMimeTypeCode() {
   my ($mime) = @_;
+  $mime = lc($mime);
   if ($mime =~ /^text/) { return 0x1; }
   elsif ($mime =~ /^image/) { return 0x2; }
   elsif ($mime =~ /^audio/) { return 0x4; }

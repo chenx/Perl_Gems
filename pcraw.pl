@@ -8,6 +8,7 @@
 # Tested on:
 # - Windows, Perl version 5.8.8.
 # - Linux
+# - Mac
 #
 # Short introduction to crawling in Perl:
 # http://www.cs.utk.edu/cs594ipm/perl/crawltut.html

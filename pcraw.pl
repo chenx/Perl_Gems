@@ -23,7 +23,7 @@
 #
 # @author: X. Chen
 # @created on: 12/22/2007
-# @last modified: 7/17/2014
+# @last modified: 7/18/2014
 #
 
 
@@ -33,11 +33,11 @@
 
 =head1 NAME 
 
-XC_Crawler. Script name is pcraw.pl
+PCraw. File name is pcraw.pl.
 
 =head1 DESCRIPTION
 
-XC_Crawler is a perl script to crawl the web.
+PCraw is a perl script to crawl the web.
 
 When used for the first time, it creates a local repository 
 ./download/ under the same directory. 
@@ -84,7 +84,7 @@ Copyrighted (c) since July, 2014
 # Package name.
 ######################################################
 
-package XC_Crawler;
+package XC;
 
 
 ######################################################
@@ -117,14 +117,15 @@ my $url_start = "";     # Where the crawling starts from.
 my $url = "";           # File url.
 my $contents;           # File contents
 my @link_queue;         # Store links already crawled.
-my @type_queue;         # Store content type of the files.
 my $content_type;       # Content type of a file.
-my @size_queue;         # Store content size of the files.
 my $content_size;       # Content size of a file.
+my @non_link_queue;     # Stores links that do not contain urls, e.g., images.
 my $plain_txt_only = 0; # Download text files (html, php, etc.) only.
-my $test_crawl = 0;     # Set to 0 to download $url_start page only.
+my $test_crawl = 0;     # Number of pages to crawl. 0 means infinite.
 my $verbose = 0;        # If 1, print more details to screen and log.
-my $download_size = 0;  # Total size of downloaded files. In Bytes.
+my $download_bytes;     # Total bytes of downloaded files.
+my $file_min_size = 0;  # Min file size to download.
+my $file_max_size = 0;  # Max file size to download. 0 means infinite.
 
 #
 # Some images are not in the directory of $url_root. 
@@ -141,6 +142,27 @@ my $get_outside_image = 0;
 #
 my $static_page_only = 0;
 
+#
+# File mime types:
+# text - 0x1
+# image - 0x2
+# audio - 0x4
+# video - 0x8
+# application - 0x10
+# message - 0x20
+# model - 0x40
+# multipart - 0x80
+# example - 0x100
+# application/vnd - 0x200
+# application/x - 0x400
+#
+# For a file whose mime type is M, download only when M & $download_type != 0.
+# Default is to download all file types, user can change the default.
+#
+# Reference: 
+# http://en.wikipedia.org/wiki/Internet_media_type
+#
+my $download_mime_type = 0xFFFFFFFF;
 
 #
 # For command line options.
@@ -165,6 +187,10 @@ my $OPT_VERSION_S = "-v";
 my $OPT_VERSION_L = "--version";
 my $OPT_VERBOSE_S = "-V";
 my $OPT_VERBOSE_L = "--verbose";
+my $OPT_MIME_TYPE_S = "-m";
+my $OPT_MIME_TYPE_L = "--mime-type";
+my $OPT_MIN_SIZE_L  = "--min-size";
+my $OPT_MAX_SIZE_L  = "--max-size";
 
 #
 # Use by getUrl() function that prints a progress bar.
@@ -188,7 +214,7 @@ MAIN: if (1) {
   
   if ($url_root eq "") {
     print ("\nError: url_root is not provided. exit.\n");
-    &show_usage();
+    &showUsage();
     exit(0);
   }
   
@@ -196,7 +222,7 @@ MAIN: if (1) {
   if (! ($url_root =~ /\/$/)) { $url_root .= "/"; }
   if ($url_start eq "") { $url_start = $url_root; }
 
-  my $log = &get_log_name();
+  my $log = &getLogName();
   open LOGFILE, ">> $log";
 
   output ("");
@@ -204,7 +230,7 @@ MAIN: if (1) {
   output ("url_root:  $url_root");
   output ("url_start: $url_start");
   output ("");
-  &get_site();
+  &getSite();
 
   close LOGFILE;
 }
@@ -235,9 +261,18 @@ sub getOptions() {
     elsif ($a eq $OPT_URL_START_S || $a eq $OPT_START_URL_L) {
       $state = $OPT_URL_START_S; 
     }
+    elsif ($a eq $OPT_MIME_TYPE_S || $a eq $OPT_MIME_TYPE_L) {
+      $state = $OPT_MIME_TYPE_S;
+    }
+    elsif ($a eq $OPT_MIN_SIZE_L) {
+      $state = $OPT_MIN_SIZE_L;
+    }
+    elsif ($a eq $OPT_MAX_SIZE_L) {
+      $state = $OPT_MAX_SIZE_L;
+    }
     
     elsif ($a eq $OPT_TEST_S || $a eq $OPT_TEST_L) {
-      $test_crawl = 1; $state = ""; 
+      $test_crawl = 1; $state = $OPT_TEST_S; 
     }    
     elsif ($a eq $OPT_PLAIN_TXT_ONLY_S || $a eq $OPT_PLAIN_TXT_ONLY_L) {
       $plain_txt_only = 1; $state = ""; 
@@ -256,10 +291,10 @@ sub getOptions() {
     }
 
     elsif ($a eq $OPT_VERSION_S || $a eq $OPT_VERSION_L) {
-      &show_version(); exit(0); 
+      &showVersion(); exit(0); 
     }
     elsif ($a eq $OPT_HELP_S || $a eq $OPT_HELP_L) {
-      &show_usage(); exit(0); 
+      &showUsage(); exit(0); 
     }
 
     elsif ($state eq $OPT_URL_ROOT_S) {
@@ -268,6 +303,18 @@ sub getOptions() {
     elsif ($state eq $OPT_URL_START_S) {
       $url_start = $a; $state = ""; 
     }
+    elsif ($state eq $OPT_TEST_S) { # max links to crawl.
+      $test_crawl = getPosInt($a); $state = ""; 
+    }
+    elsif ($state eq $OPT_MIME_TYPE_S) {
+      $download_mime_type = getPosInt($a); $state = "";
+    }
+    elsif ($state eq $OPT_MIN_SIZE_L) {
+	  $file_min_size = getPosInt($a); $state = "";    
+	}
+    elsif ($state eq $OPT_MAX_SIZE_L) {
+	  $file_max_size = getPosInt($a); $state = "";    
+	}
 
     else { 
       print "Warning: unknown option $a\n";
@@ -277,31 +324,55 @@ sub getOptions() {
 }
 
 
-sub show_usage() {
+sub getPosInt() {
+  my ($n) = @_;
+  $n = 0 + $n; # convert string to integer.
+  if ($n < 0) { $n = 0; }
+  return $n;
+}
+
+
+sub showUsage() {
   my $usage = <<"END_USAGE"; 
 
-Usage: perl $0 $OPT_URL_ROOT_S [-dhiprstuv]
+Usage: perl $0 $OPT_URL_ROOT_S <url_root> [-dhiprstuv]
 
   Options (short format):
     -d: debug, print debug information.
     -h: print this help message.
     -i: download images outside the url_root.
         Used when images are stored outside the url_root.
+    -m: file mime type. Only files with given mime types are downloaded.
+        text - 0x1
+        image - 0x2
+        audio - 0x4
+        video - 0x8
+        application - 0x10
+        message - 0x20
+        model - 0x40
+        multipart - 0x80
+        example - 0x100
+        application/vnd - 0x200
+        application/x - 0x400
+        Refer to: http://en.wikipedia.org/wiki/Internet_media_type
     -p: only download plain text files: html, txt, asp, etc. 
         Binary files are ignored.
-    -r: url_root, need to follow with url_root value. 
+    -r <url_root>: url_root, need to follow with url_root value. 
         Only files under this path are downloaded. Except when -i is used.
     -s: only download static pages. 
         Pages with url parameters like http://a.php?a=b are ignored.
-    -t: test, only download the start_url page.
-    -u: url_start, need to follow with url_start value.
+    -t <number_of_links>: the number of links to crawl. 0 means inifinite.
+    -u <url_start>: url_start, need to follow with url_start value.
         This is where a crawling task starts from.
     -v: show version information.
 
   Options (long format):
     --debug: same as -d
+    --min-size: min file size to download, in bytes.
+    --max-size: max file size to download, in bytes. 0 means infinite.
     --help: same as -h
     --include-image-outside: same as -i
+    --mime_type: same as -m
     --plain-txt-only: same as -p
     --static-only: same as -s
     --test: same as -t
@@ -320,14 +391,15 @@ Usage: perl $0 $OPT_URL_ROOT_S [-dhiprstuv]
     perl $0 --url-root http://g.com --url-start http://g.com/
     perl $0 -h
     
-  Type "Perldoc $0" to see perldoc message.
+  To see perldoc document, type: perldoc $0
+  
 END_USAGE
 
   print $usage;
 }
 
 
-sub show_version() {
+sub showVersion() {
   print "\n$0 version 1.0\n";
 }
 
@@ -335,7 +407,7 @@ sub show_version() {
 # Log file name is obtained by
 # replacing the ".pl" suffix with ".log".
 #
-sub get_log_name() {
+sub getLogName() {
   my $log = $0;
   if ($log =~ /\.pl/i) {
     $log =~ s/\.pl/\.log/i;
@@ -347,9 +419,9 @@ sub get_log_name() {
 #
 # Create local repository.
 #
-sub create_local_repos() {
+sub createLocalRepos() {
   if (! (-d $local_repos)) { 
-    &exec_cmd("mkdir \"$local_repos\"");
+    &execCmd("mkdir \"$local_repos\"");
     if (! (-d $local_repos)) { 
       output("Cannot create local repository: $local_repos");
       die(); 
@@ -362,9 +434,9 @@ sub create_local_repos() {
 #
 # Local_root derives from url_root.
 #
-sub get_local_root() {
+sub getLocalRoot() {
   my ($root) = @_;
-  if ($DEBUG) { output ("get_local_root(): root = $root" ); }
+  if ($DEBUG) { output ("getLocalRoot(): root = $root" ); }
   
   if ($root =~ /^http:\/\//i) { $root =~ s/^http:\/\///i; }
   if ($root =~ /\/$/) { $root =~ s/\/$//; } # remove trailing "/" if any.
@@ -374,19 +446,19 @@ sub get_local_root() {
   $local_root = $local_repos . $root;
   if ($DEBUG) 
   { 
-	output ("get_local_root(): local_root = $root" ); 
+	output ("getLocalRoot(): local_root = $root" ); 
   }
 }
 
 
-sub get_site() {
+sub getSite() {
   my ($ss_s, $mm_s, $hh_s) = localtime(time);
 
-  &create_local_repos(); # create local repository, if not exist.
-  &get_local_root($url_root); # create local root for this task.
+  &createLocalRepos(); # create local repository, if not exist.
+  &getLocalRoot($url_root); # create local root for this task.
 
   if (! (-d $local_root)) { 
-    &exec_cmd("mkdir \"$local_root\"");
+    &execCmd("mkdir \"$local_root\"");
     if (! (-d $local_root)) { 
       output("Abort. Cannot create local root: $local_root");
       return; # return instead of die(), to close LOGFILE handle.
@@ -405,10 +477,9 @@ sub get_site() {
   
   #print "::$url_start, $content_type, $content_size\n";
   @link_queue = (@link_queue, $url_start);
-  @type_queue = (@type_queue, $content_type);
-  @size_queue = (@size_queue, $content_size);
+  @non_link_queue = ();
   
-  &go_get_site();
+  &doGetSite();
   
   my ($ss_t, $mm_t, $hh_t) = localtime(time);
   my $sec = ($hh_t - $hh_s) * 3600 + ($mm_t - $mm_s) * 60 + ($ss_t - $ss_s);
@@ -417,74 +488,120 @@ sub get_site() {
 
 
 #
-# Crawl the site, using BFS with a queue.
+# Crawl the site, using BFS with a queue. Procedure is:
 #
-sub go_get_site() {
-  my $link_queue_len = @link_queue;
+# foreach $url in @link_queue {
+#   $content := contents of $url;
+#   @urls := all urls in $content;
+#   foreach $link in @urls {
+#     if (file $link contains more links) {
+#       add $link to @link_queue;
+#     }
+#     else {
+#       add $link to @non_link_queue;
+#       download $link;
+#     }        
+#   }
+# }
+#
+# Note: a file is saved only when its mime type is wanted.
+# For text files, even if mime type is not wanted, the 
+# contents have to be crawled to retrieve links.
+#
+sub doGetSite() {
+  my $link_queue_len = @link_queue; 
   my $link_queue_pt = 0;
-  my @new_urls;
-  my $msg;
-  my $type;
-  my $size;
-  my $content_len;
-
+  my $resource_download_ct = 0;
   my $browser = LWP::UserAgent->new();
   $browser->timeout(10);
-
-  $download_size = 0;
+  $download_bytes = 0;  # Initialize total download size.
   
   while ($link_queue_pt < $link_queue_len) {
-    $url = $link_queue[$link_queue_pt];
-    $type = $type_queue[$link_queue_pt];
-    $size = $size_queue[$link_queue_pt];
+    # For testing, only get first $test_crawl number of links.
+    if ($test_crawl > 0 && $link_queue_pt >= $test_crawl) { last; } 
 
-    # clear left over chars of current row from prevous progress bar.
-    print progress_bar(-1, 0, 0, ''); 
+    $url = $link_queue[$link_queue_pt];
     output( "link #" . (1 + $link_queue_pt) . ": $url" );
 
     $contents = &getUrl($url, $browser);
-    $content_len = length($contents);
+    my $content_len = length($contents);
     
-    if ($content_len > 0) { # if == 0, then may be "403 Access Forbidden".
-      if ($verbose) {
-        output( "   Type: $type, Size: " . ($size // $content_len) );
-      }
-      $download_size += $content_len;
-    
-      &save_content($url, $contents, $type);
-
-      print progress_bar(-1, 0, 0, ''); 
-      print "parsing links, please wait..\r";
-      @new_urls = &parseLinks($url, $contents, $type);
-      
-      if (! $test_crawl) { &add_new_links($url, @new_urls); } 
-      if ($get_outside_image) { &add_image_links($url, @new_urls); } 
+    if ($content_len <= 0) { # if == 0, then may be "403 Access Forbidden".
+      $link_queue_pt ++;
+      next;
     }
+
+    if (&mimeTypeMatch("text") && &fileSizeMatch($content_len)) {
+      &saveContent($url, $contents, $content_type, $content_len);
+    }
+    &clearProgressBar();
+      
+    print "parsing links, please wait..\r";
+    my @new_urls = &parseLinks($url, $contents);
+
+    foreach my $new_link (@new_urls) {
+      # Remove link anchor like in "http://a.com/a.html#section_1".
+      if ($new_link =~ /#[a-z0-9\-\_\%]*$/i) { 
+        $new_link =~ s/#[a-z0-9\-\_\%]*$//i;
+      }
+		
+      if ( isWantedFile($new_link) ) {
+        #print "::$new_link, $content_type, $content_size\n"; 
+        if ($content_type =~ /^text/i || $content_type eq "") {
+          #print "add to link Q\n";
+          @link_queue = (@link_queue, $new_link);
+        }
+        elsif ( &mimeTypeMatch($content_type) && 
+            &fileSizeMatch($content_size) )  { # size: from getFileHeader().
+          #print "add to non-link Q, and save\n";
+          $resource_download_ct += 1;
+          output ("file #$resource_download_ct: $new_link");
+          @non_link_queue = (@non_link_queue, $new_link);
+          my $content = &getUrl($new_link, $browser);            
+          my $content_len = length($content);
+          &saveContent($new_link, $content, $content_type, $content_len);
+          &clearProgressBar();
+        }
+      }
+	  else {
+	    #print "NOT wanted link, disgard: $new_link\n";    
+      }
+    } 
 
     $link_queue_len = @link_queue;
     $link_queue_pt ++;
   }
   
-  # clear left over chars of current row from prevous progress bar.
-  print progress_bar(-1, 0, 0, ''); 
-
-  output ("");
-  output ("Total links crawled: $link_queue_len");  
-  output ("Total download size: $download_size bytes, or " 
-          . get_download_size());
+  &clearProgressBar();
+  writeSummary($link_queue_pt);
 }
 
 
-sub get_download_size() {
+sub writeSummary() {
+  my ($links_crawled) =@_;
+  my $link_queue_len = @link_queue;
+  my $non_link_file_ct = @non_link_queue;
+
+  output ("");
+  output ("Links found (A): $link_queue_len");
+  output ("Links crawled (B): $links_crawled");
+  output ("Other files downloaded (C): $non_link_file_ct");
+  output ("Total files downloaded (B+C): " . ($links_crawled + $non_link_file_ct));
+  output ("Total download size: $download_bytes bytes, or " 
+          . getDownloadSize());
+}
+
+
+sub getDownloadSize() {
   my $size;
-  if ($download_size < 1000000) { # less than 1 MB.
-    $size = sprintf("%.3f", $download_size/1024) . " KB";
+  if ($download_bytes < 1000000) { # less than 1 MB.
+    $size = sprintf("%.3f", $download_bytes/1024) . " KB";
   }
-  elsif ($download_size < 1000000000) { # less than 1 GB.
-    $size = sprintf("%.3f", $download_size/1024/1024) . " MB";
+  elsif ($download_bytes < 1000000000) { # less than 1 GB.
+    $size = sprintf("%.3f", $download_bytes/1024/1024) . " MB";
   }
   else {
-    $size = sprintf("%.3f", $download_size/1024/1024/1024) . " GB";
+    $size = sprintf("%.3f", $download_bytes/1024/1024/1024) . " GB";
   }
   return $size;
 }
@@ -537,15 +654,16 @@ sub getUrl() {
   if ($DEBUG) { print "getUrl(): " . Dumper($remote_headers); }
   
   # Most servers return content-length, but not always.
-  $total_size = $remote_headers->content_length;
+  $total_size = $remote_headers->content_length // "";
   
   # now do the downloading.
   my $response = $browser->get($url, ':content_cb' => \&callback );
   
-  # Don't clear row here, it's too soon. Clear in function go_get_site().
-  #print progress_bar(-1,01,25,'='); 
+  # Don't clear row here, it's too soon. Clear in function doGetSite().
+  #print progressBar(-1,01,25,'='); 
   
-  if ($verbose) { print "\n"; } # Keep the progress bar, if desired.
+  # Keep the progress bar, if desired.
+  if ($verbose && $total_size ne "") { print "\n"; } 
   return $final_data; # File content.
 }
 
@@ -555,7 +673,7 @@ sub callback {
    my ($data, $response, $protocol) = @_;
    $final_data .= $data;
    #print "callback: len = " . length($final_data) . "\n";
-   print progress_bar( length($final_data), $total_size, 25, '=' ); 
+   print progressBar( length($final_data), $total_size, 25, '=' ); 
 }
 
 
@@ -572,10 +690,10 @@ sub callback {
 # wget-style. routine by tachyon
 # at http://tachyon.perlmonk.org/
 #
-sub progress_bar {
+sub progressBar {
   my ( $got, $total, $width, $char ) = @_;
   $width ||= 25; $char ||= '-'; # "||=": default to if not defined.
-  my $num_width = length ($total // "");
+  my $num_width = length ($total);
     
   # Some web servers don't give "content-length" field.
   # In such case don't print progress bar.
@@ -603,12 +721,20 @@ sub progress_bar {
 
 
 #
+# clear left over chars of current row from prevous progress bar.
+#
+sub clearProgressBar() {
+  print progressBar(-1, 0, 0, ''); 
+}
+
+
+#
 # $$link[i]: valid values for i: 0 (tag name), 1(attribute name), 2(link value)
 # e.g.: <img src='http://127.0.0.1/index.html'>
 # Here $$link[0] = img, $$link[1] = src, $$link[2] = http://127.0.0.1/index.html
 #
 sub parseLinks() {
-  my ($url, $contents, $type) = @_;
+  my ($url, $contents) = @_;
   my ($page_parser) = HTML::LinkExtor->new(undef, $url);
 
   # This would have the warning:
@@ -629,68 +755,28 @@ sub parseLinks() {
 }
 
 
-sub add_new_links() {
-  my ($url, @new_links) = @_;
-  my $len = @new_links;
-  my $new_link;
-  #print "add_new_links(): total = $len\n";
-
-  for (my $i = 0; $i < $len; $i ++) {
-    $new_link = $new_links[$i];
-    
-    # Remove links like "http://a.com/a.html#section_1".
-    if ($new_link =~ /#[a-z0-9\-\_\%]*$/i) { 
-      $new_link =~ s/#[a-z0-9\-\_\%]*$//i;
-    }
-
-    if ( isWantedFile($new_link) ) {
-      #print "::$new_link, $content_type, $content_size\n"; 
-      @link_queue = (@link_queue, $new_link);
-      @type_queue = (@type_queue, $content_type);
-      @size_queue = (@size_queue, $content_size);
-
-      if ($DEBUG) { output( "add new link: $new_link" ); }
-    }
-  }
-}
-
-
-#
-# get those files that are wanted but NOT in the $url_root folder.
-#
-sub add_image_links() {
-  my ($url, @new_links) = @_;
-  my $len = @new_links;
-  my $new_link;
-  #print "add_new_links(): total = $len\n";
-  
-  for (my $i = 0; $i < $len; $i ++) {
-    $new_link = $new_links[$i];
-
-    if ( isWantedImage($new_link) &&
-         (! link_exists($new_link)) ) {
-      @link_queue = (@link_queue, $new_link);
-      @type_queue = (@type_queue, $content_type);
-      @size_queue = (@size_queue, $content_size);
-      if ($DEBUG) { output( "add new link: $new_link" ); }
-    }
-  }
-}
-
-
-sub link_is_crawled() {
+sub linkIsCrawled() {
   my ($new_link) = @_;
-  my $len = @link_queue;
-  my $i;
-  for ($i = 0; $i < $len; $i ++) {
-    if ($new_link eq $link_queue[$i]) { return 1; }
+  #my $len = @link_queue;
+  #my $i;
+  #for ($i = 0; $i < $len; $i ++) {
+  #  if ($new_link eq $link_queue[$i]) { return 1; }
+  #}
+
+  foreach my $link (@link_queue) {
+    if ($new_link eq $link) { return 1; }
   }
+  
+  foreach my $link (@non_link_queue) {
+    if ($new_link eq $link) { return 1; }
+  }
+  
   #print "link NOT exist: $new_link\n";
   return 0;
 }
 
 
-sub insideDomain() {
+sub isInsideDomain() {
   my ($link) = @_;
   if ($link =~ /^$url_root/i) { return 1; }
   return 0;
@@ -715,13 +801,26 @@ sub getFileHeader() {
 #
 sub isWantedFile() {
   my ($link) = @_;
-  if (! &insideDomain($link)) { return 0; } 
-  if (&link_is_crawled($link)) { return 0; }
+
+  if (&linkIsCrawled($link)) { return 0; }
   if ($static_page_only && $link =~ /\?(\S+=\S*)+$/i) { return 0; }
 
   &getFileHeader($link);
+  
+  #if (undef == $content_type) { $content_type = ""; }
+  # Other ways to write this:
+  #$content_type ||= ""; // if not defined, let content_type by empty string.
+  $content_type = ($content_type // "");
+  
+  # Must use () around the regex expression to get correct precedence.
+  if ($plain_txt_only && ! ($content_type =~ /^text\//i)) { return 0; }
 
-  # content_size is null for dynamic pages.
+  if (! &isInsideDomain($link)) { 
+	if ($get_outside_image && ($content_type =~ /^image/i)) { return 1; }
+    return 0; 
+  } 
+
+  # content_size can be null for dynamic pages.
   # content_type may be null, "//" operator is "defined or".
   # both of these 2 may be undefined, but the file still can be downloaded,
   # e.g., for case when ".." is involved, like http://abc.com/../xyz.html
@@ -730,14 +829,11 @@ sub isWantedFile() {
   #  return 0; 
   #}
 
-  # Must use () around the regex expression to get correct precedence.
-  if ($plain_txt_only && ! (($content_type // "") =~ /^text\//)) { return 0; }
-
   return 1;
 }
 
 
-sub get_mime_type() {
+sub getMimeSubType() {
   my ($type) = @_;
   if (($type // "") ne "") {
     my @tmp = split(';', $type); # for cases like: "text/html; charset=utf-8"
@@ -751,14 +847,57 @@ sub get_mime_type() {
 }
 
 
-sub save_content() {
-  my ($url, $content, $type) = @_;
+sub getMimeTypeCode() {
+  my ($mime) = @_;
+  if ($mime =~ /^text/) { return 0x1; }
+  elsif ($mime =~ /^image/) { return 0x2; }
+  elsif ($mime =~ /^audio/) { return 0x4; }
+  elsif ($mime =~ /^video/) { return 0x8; }
+  elsif ($mime =~ /^application/) { return 0x10; }
+  elsif ($mime =~ /^message/) { return 0x20; }
+  elsif ($mime =~ /^model/) { return 0x40; }
+  elsif ($mime =~ /^multipart/) { return 0x80; }
+  elsif ($mime =~ /^example/) { return 0x100; }
+  elsif ($mime =~ /^application\/vnd/) { return 0x200; }
+  elsif ($mime =~ /^application\/x/) { return 0x400; }
+  else { return 0xFFFFFFFF; } # unknown type, download anyway.
+}
+
+
+#
+# Returns 1 if the file's mime type is among the ones wanted.
+#
+sub mimeTypeMatch() {
+  my ($content_type) = @_;
+  #print "(&getMimeTypeCode($content_type) & $download_mime_type) != 0 ?\n";
+  return (&getMimeTypeCode($content_type) & $download_mime_type) != 0;
+}
+
+
+#
+# Returns 1 if file size is between min and max limit, inclusive.
+# 
+sub fileSizeMatch() {
+  my ($content_len) = @_;
+  #print "content: $content_len. min=$file_min_size, max=$file_max_size\n";
+  if ($content_len < $file_min_size) { return 0; }
+  if (($file_max_size > 0) && ($content_len > $file_max_size)) { return 0; }
+  return 1;
+}
+
+
+sub saveContent() {
+  my ($url, $content, $content_type, $content_len) = @_;
   my $outfile;
   
-  my $filename = get_filename($url);
-  #print "save_content(). filename = $filename\n"  ;
-  my $localpath = get_local_path($url, $filename);
-  #print "save_content(). url=$url, localpath = $localpath\n";
+  if ($verbose) { output( "  Type: $content_type, Size: $content_len" ); }
+  if ($content_len <= 0) { return; }
+  $download_bytes += $content_len; # public variable for total download size.
+              
+  my $filename = getFilename($url);
+  #print "saveContent(). filename = $filename\n"  ;
+  my $localpath = getLocalPath($url, $filename);
+  #print "saveContent(). url=$url, localpath = $localpath\n";
   
   # This happens for default page under a directory.
   if ($filename eq "") { $filename = "index_"; }
@@ -770,15 +909,20 @@ sub save_content() {
     # In this case, get file suffix from content-type. E.g, save as:
     # This will be saved as a.php-x=1&y=2.html
     #print "type: $type\n";
-    my $t = &get_mime_type($type);
+    my $t = &getMimeSubType($content_type);
     if ($t ne "") { $filename .= ".$t"; }
   }
   elsif (! ($filename =~ /\./)) { 
+    # this happens when the url ends with "/", 
+    # and the file to save is the default under this.
+    # for example, index.html or default.html.
+    if ($filename eq "") { $filename = "index_"; }
+    
     # this happens when the file does not have a suffix, 
     # e.g., when this is the index file under a directory.
     # then the directory name is used as a file name,
     # and no directory is created locally.
-    my $t = &get_mime_type($type);
+    my $t = &getMimeSubType($content_type);
     if ($t ne "") { $filename .= ".$t"; }
   }
 
@@ -786,25 +930,18 @@ sub save_content() {
   else { $outfile = "$localpath/$filename"; }  
   
   if ($DEBUG) { output ("save content to: $outfile"); }
-
-  # this happens when the url ends with "/", 
-  # and the file to save is the default under this.
-  # for example, index.html or default.html.
-  if ($outfile =~ /\/$/) {
-      $outfile = $outfile . "index_.html";
-  }
   
   if (open OUTFILE, "> $outfile") {
     binmode(OUTFILE);
     print OUTFILE $content;
     close OUTFILE;
   } else {
-    output ("save_content() error: cannot open file to save to: $outfile");
+    output ("saveContent() error: cannot open file to save to: $outfile");
   }
 }
 
 
-sub exec_cmd() {
+sub execCmd() {
   my $cmd = shift;
   output($cmd);
   `$cmd`;
@@ -815,11 +952,11 @@ sub exec_cmd() {
 # Obtain local path from the remote url path.
 # Created needed local directory if needed.
 #
-sub get_local_path() {
+sub getLocalPath() {
   my ($path, $filename) = @_;
   my $pattern = "$url_root";
   if ($DEBUG) { 
-    print "get_local_path(): remote path=$path, filename=$filename\n"; 
+    print "getLocalPath(): remote path=$path, filename=$filename\n"; 
   }
   if ($path =~ /^$pattern/i) {
     $path =~ s/^$pattern//i;
@@ -835,10 +972,10 @@ sub get_local_path() {
   if ($local_root =~ /\/$/) { $path = "$local_root$path"; }
   else {$path = "$local_root/$path"; }
     
-  if($DEBUG) { print "get_local_path(): local dir=$path\n"; }
+  if($DEBUG) { print "getLocalPath(): local dir=$path\n"; }
   if (! (-d $path)) {
     #mkdir ($path, 0700);
-    &exec_cmd("mkdir \"$path\"");
+    &execCmd("mkdir \"$path\"");
     #if ($DEBUG) { print "create local directory: $path\n"; }
   }
 
@@ -850,12 +987,12 @@ sub get_local_path() {
 # extract filename from the url.
 # Need to remove suffix including "?.." and "#..".
 #
-sub get_filename() {
+sub getFilename() {
   my ($path) = @_;
   my $filename;
   my $i = rindex($path, "/");
   $filename = substr($path, $i + 1);
-  #if ($DEBUG) { print "get_filename(): url=$path filename=$filename\n"; }
+  #if ($DEBUG) { print "getFilename(): url=$path filename=$filename\n"; }
   return $filename;
 }
 
@@ -872,3 +1009,28 @@ sub output {
   LOGFILE->autoflush;
 }
 
+
+
+
+
+######################################################
+# Change log
+######################################################
+#
+# 7/18/2014 
+# - Changed doGetSite(). 
+#   Now put non-text files to @non_link_queue, and won't be crawled.
+#   Text files are stored in @link_queue.
+# - Added mime type constraint.
+# - Added file min/max size constraint.
+# - Change $test_crawl from on/off to number of links to crawl.
+#
+# 7/17/2014
+# - Added perldoc message.
+# - Added download total bytes count.
+# - Added command line option switches.
+# - Added download progress bar.
+# - Added package name.
+# - Changed file name from craw.pl to pcraw.pl.
+#
+######################################################

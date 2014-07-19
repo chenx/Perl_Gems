@@ -126,6 +126,7 @@ my $verbose = 0;        # If 1, print more details to screen and log.
 my $download_bytes;     # Total bytes of downloaded files.
 my $file_min_size = 0;  # Min file size to download.
 my $file_max_size = 0;  # Max file size to download. 0 means infinite.
+my $wait_interval = 1;  # Wait time (seconds) before crawl next page. Be nice.
 
 #
 # Some images are not in the directory of $url_root. 
@@ -189,6 +190,8 @@ my $OPT_VERBOSE_S = "-V";
 my $OPT_VERBOSE_L = "--verbose";
 my $OPT_MIME_TYPE_S = "-m";
 my $OPT_MIME_TYPE_L = "--mime-type";
+my $OPT_WAIT_INTERVAL_S = "-w";
+my $OPT_WAIT_INTERVAL_L = "--wait";
 my $OPT_MIN_SIZE_L  = "--min-size";
 my $OPT_MAX_SIZE_L  = "--max-size";
 
@@ -264,6 +267,9 @@ sub getOptions() {
     elsif ($a eq $OPT_MIME_TYPE_S || $a eq $OPT_MIME_TYPE_L) {
       $state = $OPT_MIME_TYPE_S;
     }
+    elsif ($a eq $OPT_WAIT_INTERVAL_S || $a eq $OPT_WAIT_INTERVAL_L) {
+      $state = $OPT_WAIT_INTERVAL_S;
+    }
     elsif ($a eq $OPT_MIN_SIZE_L) {
       $state = $OPT_MIN_SIZE_L;
     }
@@ -308,6 +314,9 @@ sub getOptions() {
     }
     elsif ($state eq $OPT_MIME_TYPE_S) {
       $download_mime_type = getPosInt($a); $state = "";
+    }
+    elsif ($state eq $OPT_WAIT_INTERVAL_S) {
+      $wait_interval = getPosInt($a); $state = "";
     }
     elsif ($state eq $OPT_MIN_SIZE_L) {
 	  $file_min_size = getPosInt($a); $state = "";    
@@ -365,6 +374,7 @@ Usage: perl $0 $OPT_URL_ROOT_S <url_root> [-dhiprstuv]
     -u <url_start>: url_start, need to follow with url_start value.
         This is where a crawling task starts from.
     -v: show version information.
+    -w: wait time before crawl next page, in second.
 
   Options (long format):
     --debug: same as -d
@@ -379,6 +389,7 @@ Usage: perl $0 $OPT_URL_ROOT_S <url_root> [-dhiprstuv]
     --url-root: same as -r
     --url_start: same as -u
     --version: same as -v
+    --wait: same as -w
 
   The most important options are:
   -r or --url-root : url_root is needed, and must be provided.
@@ -519,6 +530,7 @@ sub doGetSite() {
   while ($link_queue_pt < $link_queue_len) {
     # For testing, only get first $test_crawl number of links.
     if ($test_crawl > 0 && $link_queue_pt >= $test_crawl) { last; } 
+    sleep($wait_interval);
 
     $url = $link_queue[$link_queue_pt];
     output( "link #" . (1 + $link_queue_pt) . ": $url" );
@@ -1023,6 +1035,7 @@ sub output {
 #   Text files are stored in @link_queue.
 # - Added mime type constraint.
 # - Added file min/max size constraint.
+# - Added wait interval before crawl next page.
 # - Change $test_crawl from on/off to number of links to crawl.
 #
 # 7/17/2014

@@ -58,7 +58,7 @@ This can be provided using the -u switch.
 
 =head1 SYNOPSIS
 
-Usage: perl pcraw [-dfhmoprstuv]
+Usage: perl pcraw [-dfhimoprstuv]
 
 For more help on usage, type: perl pcraw -h 
 
@@ -95,11 +95,13 @@ package XC;
 use strict; 
 use LWP::Simple;
 use LWP::UserAgent;
+use LWP::Protocol::http; # to remove TE header.
+use HTTP::Cookies;
 use HTTP::Request;
 use HTTP::Response;
 use HTML::LinkExtor;
 use Time::Local;
-use POSIX;        # for floor(), ceil(): 
+use POSIX;        # For floor(), ceil().
 use Encode;       # For decode_utf8, in parseLinks().
 use IO::Handle;   # For flushing log file.
 use Data::Dumper; # To print remote_headers in getUrl().
@@ -117,7 +119,10 @@ my $url_root = "";      # Only files under this root will be downloaded.
 my $url_start = "";     # Where the crawling starts from.
 my $url = "";           # File url.
 my $contents;           # File contents
+my %links_found;        # Hash to store links crawled.
+my $links_found_ct = 0; # Counter for links found.
 my @link_queue;         # Store links already crawled.
+my $link_queue_pt = 0;  # pointer in $link_queue.
 my $content_type;       # Content type of a file.
 my $content_size;       # Content size of a file.
 my @non_link_queue;     # Stores links that do not contain urls, e.g., images.
@@ -129,6 +134,9 @@ my $file_min_size = 0;  # Min file size to download.
 my $file_max_size = 0;  # Max file size to download. 0 means infinite.
 my $wait_interval = 1;  # Wait time (seconds) before crawl next page. Be nice.
 my $flat_localpath = 0; # Use only one level of sub-directory locally.
+my $use_cookie = 1;
+my $use_agent_firefox = 1;
+my $overwrite = 0;      # Overwrite previous download result.
 
 #
 # Some non-text files (such as images) are not under $url_root. 
@@ -182,8 +190,8 @@ my $OPT_PLAIN_TXT_ONLY_S = "-p";
 my $OPT_PLAIN_TXT_ONLY_L = "--plain-txt-only";
 my $OPT_STATIC_ONLY_S = "-s";
 my $OPT_STATIC_ONLY_L = "--static-only";
-my $OPT_OUTSIDE_FILE_S = "-o";
-my $OPT_OUTSIDE_FILE_L = "--outside-file-include";
+my $OPT_OUTSIDE_FILE_S = "-i";
+my $OPT_OUTSIDE_FILE_L = "--include-outside-file";
 my $OPT_DEBUG_S = "-d";
 my $OPT_DEBUG_L = "--debug";
 my $OPT_VERSION_S = "-v";
@@ -198,6 +206,8 @@ my $OPT_MIN_SIZE_L  = "--min-size";
 my $OPT_MAX_SIZE_L  = "--max-size";
 my $OPT_FLAT_PATH_S = "-f";
 my $OPT_FLAT_PATH_L = "--flat-localpath";
+my $OPT_OVERWRITE_S = "-o";
+my $OPT_OVERWRITE_L = "--overwrite";
 
 #
 # Use by getUrl() function that prints a progress bar.
@@ -213,22 +223,27 @@ my $final_data; # The content of a downloaded file.
 MAIN: if (1) {
   &getOptions();
 
-  #
   # In case you want to hard-code the urls, un-comment lines below.
-  #
   #$url_root = "http://";
   #$url_start = "http://";
   
-  if ($url_root eq "") {
+  if ($url_root eq "" && $url_start eq "") {
     print ("\nError: url_root is not provided. exit.\n");
     &showUsage();
     exit(0);
   }
+  #if ($url_root eq "") { $url_root = $url_start; }
   
   # url_root should ends with "/".
   if (! ($url_root =~ /\/$/)) { $url_root .= "/"; }
   if ($url_start eq "") { $url_start = $url_root; }
 
+  if (! ($url_start =~ m/^$url_root/i)) {
+    print ("\nAbort: url_root must be a prefix of url_start\n");
+    exit(0);
+  }
+  
+  
   my $log = &getLogName();
   open LOGFILE, ">> $log";
 
@@ -305,6 +320,9 @@ sub getOptions() {
     elsif ($a eq $OPT_FLAT_PATH_S || $a eq $OPT_FLAT_PATH_L) {
       $flat_localpath = 1; $state = "";
     }
+    elsif ($a eq $OPT_OVERWRITE_S || $a eq $OPT_OVERWRITE_L) {
+      $overwrite = 1; $state = "";
+    }
 
     elsif ($a eq $OPT_VERSION_S || $a eq $OPT_VERSION_L) {
       &showVersion(); exit(0); 
@@ -360,12 +378,14 @@ sub getPosInt() {
 sub showUsage() {
   my $usage = <<"END_USAGE"; 
 
-Usage: perl $0 $OPT_URL_ROOT_S <url_root> [-dfhmoprstuv]
+Usage: perl $0 $OPT_URL_ROOT_S <url_root> [-dfhimoprstuv]
 
   Options (short format):
     -d: debug, print debug information.
     -f: use flat local path: only one level under local root.
     -h: print this help message.
+    -i: download non-text files outside the url_root.
+        Used when files are stored outside the url_root.
     -m: file mime type. Only files with given mime types are downloaded.
         text - 0x1
         image - 0x2
@@ -380,8 +400,7 @@ Usage: perl $0 $OPT_URL_ROOT_S <url_root> [-dfhmoprstuv]
         application/x - 0x400
         Refer to: http://en.wikipedia.org/wiki/Internet_media_type
     -n <number_of_links>: the number of links to crawl. 0 means inifinite.
-    -o: download non-text files outside the url_root.
-        Used when files are stored outside the url_root.
+    -o: overwrite previous download result.
     -p: only download plain text files: html, txt, asp, etc. 
         Binary files are ignored.
     -r <url_root>: root url.
@@ -397,11 +416,12 @@ Usage: perl $0 $OPT_URL_ROOT_S <url_root> [-dfhmoprstuv]
     --debug: same as -d
     --flat-localpath: same as -f
     --help: same as -h
+    --inculde-outside-file: same as -i
     --mime_type: same as -m
     --min-size: min file size to download, in bytes.
     --max-size: max file size to download, in bytes. 0 means infinite.
     --number-crawl: same as -t
-    --outside-file-include: same as -o
+    --overwrite: same as -o
     --plain-txt-only: same as -p
     --static-only: same as -s
     --url-root: same as -r
@@ -452,6 +472,31 @@ sub getLogName() {
   return $log;
 }
 
+sub getLnkFoundLog() { 
+  return "$local_root/.pcraw_lnk_found.log"; 
+}
+
+sub getLnkQueueLog() { 
+  return "$local_root/.pcraw_" . getQueueLogName() . "_lnk_Q.log"; 
+}
+
+sub getLnkQueueIndexLog() { 
+  my $name = $url_start;
+  $name =~ s/^$url_root//;
+  $name = encodePath($name);
+  return "$local_root/.pcraw_" . getQueueLogName() . "_lnk_Q_ID.log"; 
+}
+
+#
+# Get a name specific to each url_start.
+#
+sub getQueueLogName() {
+  my $name = $url_start;
+  $name =~ s/^$url_root//;
+  $name = encodePath($name);
+  $name =~ s/[\/\.]/_/g; # replace all "/" and "." with "_".
+  return $name;	
+}
 
 #
 # Create local repository.
@@ -479,6 +524,7 @@ sub getLocalRoot() {
   if ($root =~ /\/$/) { $root =~ s/\/$//; } # remove trailing "/" if any.
   
   $root =~ s/\//_/g; # replace all "/" with "_".
+  $root = encodePath($root);
 
   $local_root = $local_repos . $root;
   if ($DEBUG) 
@@ -496,6 +542,8 @@ sub getSite() {
 
   &createLocalRepos(); # create local repository, if not exist.
   &getLocalRoot($url_root); # create local root for this task.
+  
+  if ($overwrite && -d $local_root) { clearHistory(); }
 
   if (! (-d $local_root)) { 
     &execCmd("mkdir \"$local_root\"");
@@ -507,25 +555,146 @@ sub getSite() {
     output ("");
   }
 
-  if (! isWantedFile($url_start) ) {
-    $url_start .= "/"; # url_start is a directory, not a file.
-    if (! isWantedFile($url_start) ) { 
-      print "Abort. Invalid url_start: $url_start\n";
-      return;
-    }
+  #if (0 && ! isWantedFile($url_start) ) {
+  #  $url_start .= "/"; # url_start is a directory, not a file.
+  #  if (! isWantedFile($url_start) ) { 
+  #    print "Abort. Invalid url_start: $url_start\n";
+  #    return;
+  #  }
+  #}
+  
+  my $history_exist = &getCrawlHistory();
+  
+  open LOG_Lnk_Found, ">> " . &getLnkFoundLog();
+  open LOG_Lnk_Queue, ">> " . &getLnkQueueLog();
+  open LOG_Lnk_Queue_Index, "> " . &getLnkQueueIndexLog();
+
+  if (! $history_exist) {
+    #print "::$url_start, $content_type, $content_size\n";
+    @link_queue = (@link_queue, $url_start);
+    @non_link_queue = ();
+    $links_found{$url_start} = 1;
+    $links_found_ct = 1;
+    &logLnkFound("1. $url_start => 1");
+    &logLnkQueue("1. $url_start");
+    $link_queue_pt = 0;
   }
-  
-  #print "::$url_start, $content_type, $content_size\n";
-  @link_queue = (@link_queue, $url_start);
-  @non_link_queue = ();
-  
+
   &doCrawl();
+  
+  close LOG_Lnk_Queue_Index;
+  close LOG_Lnk_Queue;
+  close LOG_Lnk_Found;
   
   my ($ss_t, $mm_t, $hh_t) = localtime(time);
   my $sec = ($hh_t - $hh_s) * 3600 + ($mm_t - $mm_s) * 60 + ($ss_t - $ss_s);
   output ("Total time spent: " . &writeTime($sec) );
 }
 
+
+#
+# Overwrite crawl history.
+#
+sub clearHistory() {
+  my $file = &getLnkFoundLog(); 
+  if (-e $file) { unlink $file; }
+  $file = &getLnkQueueLog(); 
+  if (-e $file) { unlink $file; }
+  $file = &getLnkQueueIndexLog(); 
+  if (-e $file) { unlink $file; }
+}
+
+
+#
+# Read log, resume from breaking point, instead of crawl again.
+#
+sub getCrawlHistory() {
+  my $file = &getLnkQueueLog();
+  if (! (-e $file)) {
+    #print "not exist: $file\n";
+    return 0;
+  }
+  # otherwise, initialize history.
+  
+  $file = &getLnkFoundLog();
+  open FILE, "< $file" or die "getCrawlHistory(): cannot read file $file";
+  while(<FILE>) {
+    chomp();
+    #print "$_\n";
+    if (m/(\d+)\.\s(.+)\s=\>\s([-]?\d+)/) {
+      #print "$2 ... $3\n";
+      $links_found{$2} = $3;
+      print "links_found{$2} = $3;\n";
+    }
+  }
+  close FILE;
+  my @keys = keys %links_found;
+  $links_found_ct = @keys;
+  
+  # link_queue
+  $file = &getLnkQueueLog();
+  open FILE, "< $file" or die "getCrawlHistory(): cannot read file $file";
+  while(<FILE>) {
+    chomp();
+    #print "$_\n";
+    if (m/(\d+)\.\s(.+)/) {
+      #print "$2\n";
+      @link_queue = (@link_queue, $2);
+    }
+  }
+  close FILE;
+  
+  # link_queue_pt
+  $file = &getLnkQueueIndexLog();
+  open FILE, "< $file" or die "getCrawlHistory(): cannot read file $file";
+  while(<FILE>) {
+    chomp();
+    #print "$_\n";
+    $link_queue_pt = $_;
+  }
+  close FILE;
+  
+  @non_link_queue = ();
+  
+  #exit(0);
+  return 1;
+}
+
+
+sub getBrowser() {
+  push(@LWP::Protocol::http::EXTRA_SOCK_OPTS, SendTE=>0);
+  my $browser = LWP::UserAgent->new(keep_alive=>1);
+  $browser->timeout(10);
+	
+  # Use cookie.
+  # perl pcraw.pl -r http://10.24.7.16 -u http://10.24.7.16:9000/test
+  if ($use_cookie) {
+    my $cookie_jar = HTTP::Cookies->new(
+      file => 'myck.txt',
+      autosave => 1,
+      ignore_discard => 1,
+    );
+    $browser->cookie_jar( $cookie_jar );
+  }
+  #$browser->cookie_jar->clear();
+  #$browser->cookie_jar(HTTP::Cookies->new(hide_cookie2 => 1));
+
+  # Simulate Firefox Agent.
+  if ($use_agent_firefox) {
+    $browser->default_headers(HTTP::Headers->new(
+      'User-Agent' => 'Mozilla/5.0 (Windows NT 5.1; rv:30.0) Gecko/20100101 Firefox/30.0',
+      'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      #'Accept' => '*/*',
+      'Accept-Language' => 'en-US,en;q=0.5',
+      #'Accept-Encoding' => 'gzip, deflate',
+      #Connection => 'keep-alive',
+      #'keep-alive' => '1',
+    ));
+    #$browser->headers()->remove_header('Connection');
+  } 
+  
+  return $browser; 
+}
 
 #
 # Crawl the site, using BFS with a queue. Procedure is:
@@ -542,6 +711,7 @@ sub getSite() {
 #       add $link to @non_link_queue;
 #       download $link;
 #     }        
+#     if ($link not in %links_found) { add $link to %links_vsiited; }
 #   }
 # }
 #
@@ -551,10 +721,9 @@ sub getSite() {
 #
 sub doCrawl() {
   my $link_queue_len = @link_queue; 
-  my $link_queue_pt = 0;
   my $resource_download_ct = 0;
-  my $browser = LWP::UserAgent->new();
-  $browser->timeout(10);
+  #push(@LWP::Protocol::http::EXTRA_SOCK_OPTS, SendTE=>0);
+  my $browser = getBrowser();
   $download_bytes = 0;  # Initialize total download size.
   
   while ($link_queue_pt < $link_queue_len) {
@@ -563,6 +732,10 @@ sub doCrawl() {
     sleep($wait_interval);
 
     $url = $link_queue[$link_queue_pt];
+    if (linkIsCrawled($url)) { 
+      #$link_queue_pt ++;
+      #next; 
+    } # ignore links crawled.
     output( "link #" . (1 + $link_queue_pt) . ": $url" );
 
     $contents = &getUrl($url, $browser);
@@ -589,9 +762,12 @@ sub doCrawl() {
         
       if ( isWantedFile($new_url) ) {
         #print "::$new_url, $content_type, $content_size\n"; 
-        if ($content_type =~ /^text/i || $content_type eq "") {
-          #print "add to link Q\n";
+        if ($content_type =~ /text\/html/i || $content_type eq "") {
+          #print "add to link Q, type: $content_type\n";
           @link_queue = (@link_queue, $new_url);
+          
+          $link_queue_len ++; #= @link_queue;
+          logLnkQueue("$link_queue_len. $new_url");
         }
         elsif ( &mimeTypeMatch($content_type) && 
             &fileSizeMatch($content_size) )  { # size: from getFileHeader().
@@ -608,14 +784,57 @@ sub doCrawl() {
       else {
         #print "NOT wanted link, disgard: $new_link\n";    
       }
+      
+      if (! exists($links_found{$new_url})) {
+        $links_found{$new_url} = $links_found{$url} + 1; # record crawl level.
+        $links_found_ct ++;
+        &logLnkFound("$links_found_ct. $new_url => $links_found{$new_url}");
+      }
     } 
+    
+    #$links_found{$url} *= -1; # lable this url as has finished crawling.
 
     $link_queue_len = @link_queue;
     $link_queue_pt ++;
   }
   
+  &dumpLinksCrawled($link_queue_pt);
+  logLnkQueueIndex($link_queue_pt);
+  
   &clearProgressBar();
   &writeSummary($link_queue_pt);
+}
+
+
+sub recordLinkFound() {
+  my ($new_url, $done) = @_;
+  if (! exists($links_found{$new_url})) {
+    $links_found{$new_url} = $links_found{$url} + 1; # record crawl level.
+    $links_found_ct ++;
+    if ($done) {
+      &logLnkFound("$links_found_ct. $new_url => $links_found{$new_url}");
+    }
+  }
+}
+
+
+
+sub dumpLinksCrawled() {
+  my ($link_queue_pt) = @_;
+  print "\n\n== Links found (link => depth) ==\n";
+  my @keys = keys %links_found;
+  my $len = @keys;
+  for (my $i = 1; $i <= $len; ++ $i) {
+    my $key = $keys[$i-1];
+    print "$i. $key => " . $links_found{$key} . "\n";
+  }
+    
+  print "\n== links crawlable ==\n";
+  $len = @link_queue;
+  for (my $i = 1; $i <= $len; ++ $i) {
+    print "$i. $link_queue[$i - 1]\n";
+  }
+  print "== current pointer: $link_queue_pt\n";
 }
 
 
@@ -623,15 +842,19 @@ sub doCrawl() {
 # Write download summary.
 #
 sub writeSummary() {
-  my ($links_crawled) =@_;
+  my ($link_queue_pt) =@_;
   my $link_queue_len = @link_queue;
   my $non_link_file_ct = @non_link_queue;
+  
+  my @keys = keys %links_found;
+  my $links_found = @keys;
 
   output ("");
-  output ("Links found (A): $link_queue_len");
-  output ("Links crawled (B): $links_crawled");
-  output ("Other files downloaded (C): $non_link_file_ct");
-  output ("Total files downloaded (B+C): " . ($links_crawled + $non_link_file_ct));
+  output ("Links found: $links_found");
+  output ("Links crawlable: $link_queue_len");
+  output ("Links crawled (A): $link_queue_pt");
+  output ("Other files downloaded (B): $non_link_file_ct");
+  output ("Total files downloaded (A+B): " . ($links_found + $non_link_file_ct));
   output ("Total download size: $download_bytes bytes, or " 
           . getDownloadSize());
 }
@@ -807,16 +1030,22 @@ sub parseLinks() {
 # 
 sub linkIsCrawled() {
   my ($new_link) = @_;
-  
-  foreach my $link (@link_queue) {
-    if ($new_link eq $link) { return 1; }
+  if (exists($links_found{$new_link})) { 
+    #print "link has been visited: $new_link\n";
+    return 1; 
   }
- 
-  foreach my $link (@non_link_queue) {
-    if ($new_link eq $link) { return 1; }
-  }
-  
   return 0;
+	
+  
+  #foreach my $link (@link_queue) {
+  #  if ($new_link eq $link) { return 1; }
+  #}
+ 
+  #foreach my $link (@non_link_queue) {
+  #  if ($new_link eq $link) { return 1; }
+  #}
+  
+  #return 0;
 }
 
 
@@ -989,6 +1218,7 @@ sub saveContent() {
     # and no directory is created locally.
     my $t = &getMimeSubType($content_type);
     if ($t ne "") { $filename .= ".$t"; }
+    else { $filename .= ".html"; } # default guess
   }
 
   if ($localpath =~ /\/$/) { $outfile = "$localpath$filename"; }
@@ -1094,15 +1324,23 @@ sub getLocalPath() {
   if ($local_root =~ /\/$/) { $path = "$local_root$path"; }
   else {$path = "$local_root/$path"; }
     
-  # path name (in windows) cannot be any of: \/:*?"<>|
-  # replace these with "-", e.g., for port number: http://a.com:8080.
-  # \ and / don't have to be included, since they are url delimiter too.
+  $path = encodePath($path);  
+  if($DEBUG) { print "getLocalPath(): local dir=$path\n"; }
+
+  return $path;
+}
+
+
+#
+# path name (in windows) cannot be any of: \/:*?"<>|
+# replace these with "-", e.g., for port number: http://a.com:8080.
+# \ and / don't have to be included, since they are url delimiter too.
+#
+sub encodePath() {
+  my ($path) = @_;
   if ($path =~ m/[\:\*\?\"\<\>\|]/) {
     $path =~ s/[\:\*\?\"\<\>\|]/-/g; 
   }  
-  
-  if($DEBUG) { print "getLocalPath(): local dir=$path\n"; }
-
   return $path;
 }
 
@@ -1146,12 +1384,40 @@ sub output {
 }
 
 
+sub logLnkFound() {
+  my ($msg) = @_;
+  print LOG_Lnk_Found ("$msg\n");
+  LOG_Lnk_Found->autoflush;
+}
+
+sub logLnkQueue() {
+  my ($msg) = @_;
+  print LOG_Lnk_Queue ("$msg\n");
+  LOG_Lnk_Queue->autoflush;
+}
+
+sub logLnkQueueIndex() {
+  my ($msg) = @_;
+  print LOG_Lnk_Queue_Index ("$msg\n");
+  LOG_Lnk_Queue_Index->autoflush;
+}
+
 
 
 
 ######################################################
 # Change log
 ######################################################
+# 7/19/2014
+# - added cookie support
+# - added browser agent simulation (firefox)
+# - added hash %links_found.
+# - add history record: .pcraw_lnk_found/Q/Q_ID config files under
+#   local_root. Added option switch -o and --overwrite for this.
+#   - Now each url_start has 2 related log files: _Q.log and _Q_ID.log
+#     Another global log _found.log logs all files completed crawl and download.
+#     Under the same url_root, starting from different url_start is possible,
+#     completed files will not crawl and download again.
 #
 # 7/18/2014 
 # - Changed doCrawl(). 

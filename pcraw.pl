@@ -6,13 +6,12 @@
 # starting from the page $url_start.
 #
 # Tested on:
-# - Windows, Perl version 5.8.8.
+# - Windows
 # - Linux
 # - Mac
 #
 # Short introduction to crawling in Perl:
-# http://www.cs.utk.edu/cs594ipm/perl/crawltut.html
-#
+#     http://www.cs.utk.edu/cs594ipm/perl/crawltut.html
 # LWP: http://search.cpan.org/~gaas/libwww-perl-5.805/lib/LWP.pm
 # HTML parser: http://search.cpan.org/dist/HTML-Parser/
 # POSIX: http://search.cpan.org/~rgarcia/perl-5.10.0/ext/POSIX/POSIX.pod
@@ -24,7 +23,7 @@
 #
 # @author: X. Chen
 # @created on: 12/22/2007
-# @last modified: 7/18/2014
+# @last modified: 7/22/2014
 #
 
 
@@ -58,7 +57,7 @@ This can be provided using the -u switch.
 
 =head1 SYNOPSIS
 
-Usage: perl pcraw [-dfhimoprstuv]
+Usage: perl pcraw [-dfghilmoprstuvw]
 
 For more help on usage, type: perl pcraw -h 
 
@@ -138,6 +137,7 @@ my $flat_localpath = 0; # Use only one level of sub-directory locally.
 my $use_cookie = 1;
 my $use_agent_firefox = 1;
 my $overwrite = 0;      # Overwrite previous download result.
+my $global_crawl = 0;   # If 1, allow crawl outside $url_root.
 
 
 #
@@ -211,7 +211,9 @@ my $OPT_FLAT_PATH_L = "--flat-localpath";
 my $OPT_OVERWRITE_S = "-o";
 my $OPT_OVERWRITE_L = "--overwrite";
 my $OPT_CRAWL_MAX_LEVEL_S = "-l";
-my $OPT_CRAWL_MAX_LEVEL_L = "--level";
+my $OPT_CRAWL_MAX_LEVEL_L = "--level-crawl";
+my $OPT_GLOBAL_CRAWL_S = "-g";
+my $OPT_GLOBAL_CRAWL_L = "--global-crawl";
 
 #
 # Use by getUrl() function that prints a progress bar.
@@ -271,15 +273,29 @@ MAIN: if (1) {
 
 
 sub getUrlRootFromUrlStart() {
-  my $f = $url_start;
-  $f =~ s/^http:\/\///i; # remove "http://".
+  my $f = &getDomain($url_start);
+  #$url_start;
+  #$f =~ s/^http:\/\///i; # remove "http://".
+  #my $index = index($f, "/");
+  #if ($index >= 0) {
+  #  $f = substr($f, 0, $index);
+  #}
+  $f = "http://$f/";
+  #print "url_root: $f\n";
+  return $f;
+}
+
+#
+# from "http://a.com/b/c", get "a.com" and return.
+#
+sub getDomain() {
+  my ($f) = @_;
+  #$f =~ s/^http:\/\///i; # remove "http://".
+  $f = &removeHttpHdr($f);
   my $index = index($f, "/");
   if ($index >= 0) {
     $f = substr($f, 0, $index);
-  }
-  $f = "http://$f/";
-  print "url_root: $f\n";
-  #exit(0);
+  }  
   return $f;
 }
 
@@ -345,6 +361,9 @@ sub getOptions() {
     elsif ($a eq $OPT_OVERWRITE_S || $a eq $OPT_OVERWRITE_L) {
       $overwrite = 1; $state = "";
     }
+    elsif ($a eq $OPT_GLOBAL_CRAWL_S || $a eq $OPT_GLOBAL_CRAWL_L) {
+      $global_crawl = 1; $state = "";
+    }
 
     # Options that cause the program to display a message and exit.
     elsif ($a eq $OPT_VERSION_S || $a eq $OPT_VERSION_L) {
@@ -405,14 +424,16 @@ sub getPosInt() {
 sub showUsage() {
   my $usage = <<"END_USAGE"; 
 
-Usage: perl $0 $OPT_URL_ROOT_S <url_root> [-dfhimoprstuv]
+Usage: perl $0 $OPT_URL_ROOT_S <url_root> [-dfghilmoprstuvw]
 
   Options (short format):
     -d: debug, print debug information.
     -f: use flat local path: only one level under local root.
+    -g: allow global crawl outside url_root.
     -h: print this help message.
     -i: download non-text files outside the url_root.
         Used when files are stored outside the url_root.
+    -l: max levels to crawl. Default to 0, 0 means inifinite.
     -m: file mime type. Only files with given mime types are downloaded.
         text - 0x1
         image - 0x2
@@ -442,8 +463,10 @@ Usage: perl $0 $OPT_URL_ROOT_S <url_root> [-dfhimoprstuv]
   Options (long format):
     --debug: same as -d
     --flat-localpath: same as -f
+    --global-crawl: same as -g
     --help: same as -h
     --inculde-outside-file: same as -i
+    --level-crawl: same as -l
     --mime_type: same as -m
     --min-size: min file size to download, in bytes.
     --max-size: max file size to download, in bytes. 0 means infinite.
@@ -552,7 +575,8 @@ sub getLocalRoot() {
   my ($root) = @_;
   if ($DEBUG) { output ("getLocalRoot(): root = $root" ); }
   
-  if ($root =~ /^http:\/\//i) { $root =~ s/^http:\/\///i; }
+  #if ($root =~ /^http:\/\//i) { $root =~ s/^http:\/\///i; }
+  $root = &removeHttpHdr($root);
   if ($root =~ /\/$/) { $root =~ s/\/$//; } # remove trailing "/" if any.
   
   $root =~ s/\//_/g; # replace all "/" with "_".
@@ -565,6 +589,16 @@ sub getLocalRoot() {
   }
 }
 
+
+#
+# Remove "http://" or "https://" from head of string.
+#
+sub removeHttpHdr() {
+  my ($s) = @_;
+  if ($s =~ /^http:\/\//i) { $s =~ s/^http:\/\///i; }
+  elsif ($s =~ /^https:\/\//i) { $s =~ s/^https:\/\///i; }
+  return $s;
+}
 
 #
 # Start to crawl from the url_start website.
@@ -718,7 +752,7 @@ sub getBrowser() {
   # perl pcraw.pl -r http://10.24.7.16 -u http://10.24.7.16:9000/test
   if ($use_cookie) {
     my $cookie_jar = HTTP::Cookies->new(
-      file => 'myck.txt',
+      file => '.pcrawl_cookie.txt',
       autosave => 1,
       ignore_discard => 1,
     );
@@ -872,23 +906,14 @@ sub doCrawl() {
   logLnkQueueIndex($link_queue_pt);
   
   &clearProgressBar();
-  &dumpLinksCrawled($link_queue_pt);
+  #&dumpLinksCrawled($link_queue_pt);
   &writeSummary($link_queue_pt);
 }
 
 
-sub recordLinkFound() {
-  my ($new_url, $done) = @_;
-  if (! exists($links_found{$new_url})) {
-    $links_found{$new_url} = $links_found{$url} + 1; # record crawl level.
-    $links_found_ct ++;
-    if ($done) {
-      &logLnkFound("$links_found_ct. $new_url => $links_found{$new_url}");
-    }
-  }
-}
-
-
+#
+# For development/debug use only.
+#
 sub dumpLinksCrawled() {
   my ($link_queue_pt) = @_;
   print "\n\n== Links found (link => depth) ==\n";
@@ -924,7 +949,7 @@ sub writeSummary() {
   output ("Links crawlable: $link_queue_len");
   output ("Links crawled (A): $link_queue_pt");
   output ("Other files downloaded (B): $non_link_file_ct");
-  output ("Total files downloaded (A+B): " . ($links_found + $non_link_file_ct));
+  output ("Total files downloaded (A+B): " . ($link_queue_pt + $non_link_file_ct));
   output ("Total download size: $download_bytes bytes, or " 
           . getDownloadSize());
 }
@@ -1116,7 +1141,6 @@ sub linkIsCrawled() {
 sub isInsideDomain() {
   my ($link) = @_;
   if ($link =~ /^$url_root/i) { return 1; }
-  #return 1;
   return 0;
 }
 
@@ -1160,7 +1184,7 @@ sub isWantedFile() {
   # Must use () around the regex expression to get correct precedence.
   if ($plain_txt_only && ! ($content_type =~ /^text\//i)) { return 0; }
 
-  if (! &isInsideDomain($link)) { 
+  if (! $global_crawl && ! &isInsideDomain($link)) { 
     if ($get_outside_file && ! ($content_type =~ /^text/i)) { return 1; }
     return 0; 
   } 
@@ -1248,12 +1272,13 @@ sub saveContent() {
   if ($verbose) { output( "  Type: $content_type, Size: $content_len" ); }
   if ($content_len <= 0) { return; }
   $download_bytes += $content_len; # public variable for total download size.
+
               
   my $filename = getFilename($url);
-  #print "saveContent(). filename = $filename\n"  ;
+  #print "saveContent(). url = $url, filename = $filename\n"  ;
   my $localpath = getLocalPath($url, $filename);
   &createPath($localpath);
-  #print "saveContent(). url=$url, localpath = $localpath\n";
+  #print "saveContent(). url=$url, localpath = $localpath, filename=$filename\n";
   
   # This happens for default page under a directory.
   if ($filename eq "") { $filename = "index_"; }
@@ -1282,7 +1307,7 @@ sub saveContent() {
     if ($t ne "") { $filename .= ".$t"; }
     else { $filename .= ".html"; } # default guess
   }
-
+  
   if ($localpath =~ /\/$/) { $outfile = "$localpath$filename"; }
   else { $outfile = "$localpath/$filename"; }  
   
@@ -1366,16 +1391,25 @@ sub execCmd() {
 #
 sub getLocalPath() {
   my ($path, $filename) = @_;
+
+  # When global_crawl is on, path is outside url_root.
+  # Call the extension function.
+  if ($global_crawl && ! &isInsideDomain($path)) { 
+    return &getLocalPath_outsideDomain($url, $filename);
+  } 
+  # Otherwise, path is inside url_root. Process below.
+  
   if ($flat_localpath) { return $local_root; } # Use flat path.
   
-  my $pattern = "$url_root";
+  #my $pattern = "$url_root";
   if ($DEBUG) { 
     print "getLocalPath(): remote path=$path, filename=$filename\n"; 
   }
-  if ($path =~ /^$pattern/i) {
-    $path =~ s/^$pattern//i;
-  } else { # not under the same $url_root.
-    if ($path =~ /^http:\/\//) { $path =~ s/^http:\/\///; } 
+  if ($path =~ /^$url_root/i) {
+    $path =~ s/^$url_root//i;
+  } else { # not under the same $url_root. Should not happen here.
+    #if ($path =~ /^http:\/\//) { $path =~ s/^http:\/\///; } 
+    $path = &removeHttpHdr($path);
   }
 
   # Remove filename from path.
@@ -1389,6 +1423,26 @@ sub getLocalPath() {
   $path = encodePath($path);  
   if($DEBUG) { print "getLocalPath(): local dir=$path\n"; }
 
+  return $path;
+}
+
+
+sub getLocalPath_outsideDomain() {
+  my ($path, $filename) = @_;
+  
+  if ($flat_localpath) {
+    $path = encodePath( &getDomain($path) );
+    $path = "$local_repos/$path";
+    return $path;
+  }
+  
+  #$path =~ s/^http:\/\///; # remove "http://".
+  $path = &removeHttpHdr($path);
+  
+  $path = substr($path, 0, length($path) - length($filename));
+  $path = "$local_repos" . encodePath($path);
+  #print "getLocalPath_outsideDomain: path=$path, file=$filename\n";
+  
   return $path;
 }
 
@@ -1422,10 +1476,14 @@ sub createPath() {
 #
 sub getFilename() {
   my ($path) = @_;
-  my $filename;
+  my $filename = "";
+  
+  #if ($path =~ /http:\/\//i) { $path =~ s/http:\/\///i; }
+  $path = &removeHttpHdr($path);
+  
   my $i = rindex($path, "/");
-  $filename = substr($path, $i + 1);
-  #if ($DEBUG) { print "getFilename(): url=$path filename=$filename\n"; }
+  if ($i > 0) { $filename = substr($path, $i + 1); }
+  #if ($DEBUG) { print "getFilename(): i=$i, url=$path, filename=$filename\n"; #}
   return $filename;
 }
 
@@ -1472,6 +1530,8 @@ sub logLastUrlStart() {
 }
 
 
+
+
 ######################################################
 # Change log
 ######################################################
@@ -1488,6 +1548,9 @@ sub logLastUrlStart() {
 #
 # - added log .pcraw_last_url_start.log, about the previous url_start
 #   used. But this is not used in any places yet, so just for information.
+#
+# - added support for global crawl - not limited to under url_root.
+#   this is specified using -g or --gobal-crawl.
 #
 # = So, the current log structure is:
 #   - shared logs: 
@@ -1542,3 +1605,4 @@ sub logLastUrlStart() {
 # - Changed file name from craw.pl to pcraw.pl.
 #
 ######################################################
+

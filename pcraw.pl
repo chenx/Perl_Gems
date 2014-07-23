@@ -895,9 +895,10 @@ sub doCrawl() {
 
     $link_queue_len = @link_queue;
     $link_queue_pt ++;
+    &logLnkQueueIndex($link_queue_pt);
   } # end of while.
   
-  logLnkQueueIndex($link_queue_pt);
+  &logLnkQueueIndex($link_queue_pt);
   
   &clearProgressBar();
   #&dumpLinksCrawled($link_queue_pt);

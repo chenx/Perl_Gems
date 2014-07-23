@@ -128,6 +128,7 @@ my $content_size;       # Content size of a file.
 my @non_link_queue;     # Stores links that do not contain urls, e.g., images.
 my $plain_txt_only = 0; # Download text files (html, php, etc.) only.
 my $crawl_number = 0;   # Number of pages to crawl. 0 means infinite.
+my $crawl_max_level = 0;# How deep in levels the crawl can go. 0 means ininite.
 my $verbose = 0;        # If 1, print more details to screen and log.
 my $download_bytes;     # Total bytes of downloaded files.
 my $file_min_size = 0;  # Min file size to download.
@@ -137,6 +138,7 @@ my $flat_localpath = 0; # Use only one level of sub-directory locally.
 my $use_cookie = 1;
 my $use_agent_firefox = 1;
 my $overwrite = 0;      # Overwrite previous download result.
+
 
 #
 # Some non-text files (such as images) are not under $url_root. 
@@ -208,6 +210,8 @@ my $OPT_FLAT_PATH_S = "-f";
 my $OPT_FLAT_PATH_L = "--flat-localpath";
 my $OPT_OVERWRITE_S = "-o";
 my $OPT_OVERWRITE_L = "--overwrite";
+my $OPT_CRAWL_MAX_LEVEL_S = "-l";
+my $OPT_CRAWL_MAX_LEVEL_L = "--level";
 
 #
 # Use by getUrl() function that prints a progress bar.
@@ -232,10 +236,10 @@ MAIN: if (1) {
     &showUsage();
     exit(0);
   }
-  #if ($url_root eq "") { $url_root = $url_start; }
   
-  # url_root should ends with "/".
-  if (! ($url_root =~ /\/$/)) { $url_root .= "/"; }
+  if ($url_root eq "") { $url_root = &getUrlRootFromUrlStart(); }
+  if (! ($url_root =~ /\/$/)) { $url_root .= "/"; } # url_root ends with "/".
+  if ($url_root eq "$url_start/") { $url_start = "$url_start/"; }
   if ($url_start eq "") { $url_start = $url_root; }
 
   if (! ($url_start =~ m/^$url_root/i)) {
@@ -266,6 +270,19 @@ MAIN: if (1) {
 ######################################################
 
 
+sub getUrlRootFromUrlStart() {
+  my $f = $url_start;
+  $f =~ s/^http:\/\///i; # remove "http://".
+  my $index = index($f, "/");
+  if ($index >= 0) {
+    $f = substr($f, 0, $index);
+  }
+  $f = "http://$f/";
+  print "url_root: $f\n";
+  #exit(0);
+  return $f;
+}
+
 #
 # Get command line option switch values.
 #
@@ -280,6 +297,7 @@ sub getOptions() {
 
     my $a = $ARGV[$i];
 
+    # Options followed with a value.
     if ($a eq $OPT_URL_ROOT_S || $a eq $OPT_URL_ROOT_L) {
       $state = $OPT_URL_ROOT_S; 
     }    
@@ -292,6 +310,9 @@ sub getOptions() {
     elsif ($a eq $OPT_WAIT_INTERVAL_S || $a eq $OPT_WAIT_INTERVAL_L) {
       $state = $OPT_WAIT_INTERVAL_S;
     }
+    elsif ($a eq $OPT_CRAWL_MAX_LEVEL_S || $a eq $OPT_CRAWL_MAX_LEVEL_L) {
+      $state = $OPT_CRAWL_MAX_LEVEL_S;
+    }
     elsif ($a eq $OPT_MIN_SIZE_L) {
       $state = $OPT_MIN_SIZE_L;
     }
@@ -299,6 +320,7 @@ sub getOptions() {
       $state = $OPT_MAX_SIZE_L;
     }
     
+    # Options whose value is on/off, and do not follow with a value.
     elsif ($a eq $OPT_CRAWL_NUMBER_S || $a eq $OPT_CRAWL_NUMBER_L) {
       $crawl_number = 1; $state = $OPT_CRAWL_NUMBER_S; 
     }    
@@ -324,6 +346,7 @@ sub getOptions() {
       $overwrite = 1; $state = "";
     }
 
+    # Options that cause the program to display a message and exit.
     elsif ($a eq $OPT_VERSION_S || $a eq $OPT_VERSION_L) {
       &showVersion(); exit(0); 
     }
@@ -331,6 +354,7 @@ sub getOptions() {
       &showUsage(); exit(0); 
     }
 
+    # Get values for options with a value.
     elsif ($state eq $OPT_URL_ROOT_S) {
       $url_root = $a; $state = ""; 
     }
@@ -351,6 +375,9 @@ sub getOptions() {
     }
     elsif ($state eq $OPT_MAX_SIZE_L) {
       $file_max_size = getPosInt($a); $state = "";    
+    }
+    elsif ($state eq $OPT_CRAWL_MAX_LEVEL_S) {
+      $crawl_max_level = getPosInt($a); $state = "";
     }
 
     else { 
@@ -487,6 +514,11 @@ sub getLnkQueueIndexLog() {
   return "$local_root/.pcraw_" . getQueueLogName() . "_lnk_Q_ID.log"; 
 }
 
+sub getLastUrlStartLog() {
+  return "$local_root/.pcraw_last_url_start.log";
+}
+
+
 #
 # Get a name specific to each url_start.
 #
@@ -565,17 +597,18 @@ sub getSite() {
   
   my $history_exist = &getCrawlHistory();
   
+  &logLastUrlStart(); # log which url_start this run uses.
   open LOG_Lnk_Found, ">> " . &getLnkFoundLog();
   open LOG_Lnk_Queue, ">> " . &getLnkQueueLog();
   open LOG_Lnk_Queue_Index, "> " . &getLnkQueueIndexLog();
 
   if (! $history_exist) {
-    #print "::$url_start, $content_type, $content_size\n";
+    #print "::$url_start\n";
     @link_queue = (@link_queue, $url_start);
     @non_link_queue = ();
-    $links_found{$url_start} = 1;
+    $links_found{$url_start} = -1;
     $links_found_ct = 1;
-    &logLnkFound("1. $url_start => 1");
+    &logLnkFound("1. $url_start => $links_found{$url_start}");
     &logLnkQueue("1. $url_start");
     $link_queue_pt = 0;
   }
@@ -609,14 +642,8 @@ sub clearHistory() {
 # Read log, resume from breaking point, instead of crawl again.
 #
 sub getCrawlHistory() {
-  my $file = &getLnkQueueLog();
-  if (! (-e $file)) {
-    #print "not exist: $file\n";
-    return 0;
-  }
-  # otherwise, initialize history.
-  
-  $file = &getLnkFoundLog();
+  my $file = &getLnkFoundLog();
+  if (! (-e $file)) { return 0; }
   open FILE, "< $file" or die "getCrawlHistory(): cannot read file $file";
   while(<FILE>) {
     chomp();
@@ -624,12 +651,21 @@ sub getCrawlHistory() {
     if (m/(\d+)\.\s(.+)\s=\>\s([-]?\d+)/) {
       #print "$2 ... $3\n";
       $links_found{$2} = $3;
-      print "links_found{$2} = $3;\n";
+      #print "links_found{$2} = $3;\n";
     }
   }
   close FILE;
   my @keys = keys %links_found;
   $links_found_ct = @keys;
+  
+  #&dumpHash(\%links_found); print "--------------\n";
+
+  $file = &getLnkQueueLog();
+  if (! (-e $file)) {
+    #print "not exist: $file\n";
+    return 0;
+  }
+  # otherwise, initialize history.
   
   # link_queue
   $file = &getLnkQueueLog();
@@ -658,6 +694,18 @@ sub getCrawlHistory() {
   
   #exit(0);
   return 1;
+}
+
+
+sub dumpHash() {
+  my $h = shift;
+  my %hash = %$h;
+  my @keys = keys %hash;
+  my $i = 0;
+  foreach my $key (@keys) {
+    ++ $i;
+    print "$i. $key => $hash{$key}\n";
+  }
 }
 
 
@@ -715,16 +763,23 @@ sub getBrowser() {
 #   }
 # }
 #
-# Note: a file is saved only when its mime type is wanted.
-# For text files, even if mime type is not wanted, the 
-# contents have to be crawled to retrieve links.
+# Note: 
+# 1) A file is saved only when its mime type is wanted.
+#    For text files, even if mime type is not wanted, the 
+#    contents have to be crawled to retrieve links.
+# 2) text/html files, when first found, inserted to %links_found
+#    but value is negative, which means they are found but not crawled
+#    yet. When they are crawled, their value is changed to positive.
+#    This make crawl starting from different url_start manageable.
+# 3) In the log files _found.log and _lnk_Q.log, the numbering 
+#    is actually useless. 
 #
 sub doCrawl() {
   my $link_queue_len = @link_queue; 
   my $resource_download_ct = 0;
-  #push(@LWP::Protocol::http::EXTRA_SOCK_OPTS, SendTE=>0);
   my $browser = getBrowser();
   $download_bytes = 0;  # Initialize total download size.
+  #&dumpHash(\%links_found); print "============\n";
   
   while ($link_queue_pt < $link_queue_len) {
     # For testing, only get first $crawl_number number of links.
@@ -732,10 +787,16 @@ sub doCrawl() {
     sleep($wait_interval);
 
     $url = $link_queue[$link_queue_pt];
-    if (linkIsCrawled($url)) { 
-      #$link_queue_pt ++;
-      #next; 
-    } # ignore links crawled.
+    if ($links_found{$url} < 0) {  # should alwasy exist and be true
+      $links_found{$url} = - $links_found{$url}; # record crawl level.
+      #$links_found_ct ++;
+      &logLnkFound("$links_found_ct. $url => $links_found{$url}");            
+    } # set this url as crawled.
+    
+    # Do not crawl more than max levels.
+    if ($crawl_max_level > 0 && ($links_found{$url} > $crawl_max_level)) { last; }
+    
+    # Otherwise, continue crawl.
     output( "link #" . (1 + $link_queue_pt) . ": $url" );
 
     $contents = &getUrl($url, $browser);
@@ -768,6 +829,12 @@ sub doCrawl() {
           
           $link_queue_len ++; #= @link_queue;
           logLnkQueue("$link_queue_len. $new_url");
+
+          #if (! exists($links_found{$new_url}) || $links_found{$new_url} < 0) {
+            $links_found{$new_url} = - ( $links_found{$url} + 1 ); # record crawl level.
+            $links_found_ct ++;
+            &logLnkFound("$links_found_ct. $new_url => $links_found{$new_url}");            
+          #}
         }
         elsif ( &mimeTypeMatch($content_type) && 
             &fileSizeMatch($content_size) )  { # size: from getFileHeader().
@@ -785,23 +852,27 @@ sub doCrawl() {
         #print "NOT wanted link, disgard: $new_link\n";    
       }
       
+      #print "::$new_url:: $links_found{$new_url}\n";
       if (! exists($links_found{$new_url})) {
         $links_found{$new_url} = $links_found{$url} + 1; # record crawl level.
+        if ($content_type =~ /text\/html/i) { # html files should keep crawlable.
+          $links_found{$new_url} = - $links_found{$new_url}; 
+        }
         $links_found_ct ++;
         &logLnkFound("$links_found_ct. $new_url => $links_found{$new_url}");
       }
-    } 
+    } # end of foreach.
     
     #$links_found{$url} *= -1; # lable this url as has finished crawling.
 
     $link_queue_len = @link_queue;
     $link_queue_pt ++;
-  }
+  } # end of while.
   
-  &dumpLinksCrawled($link_queue_pt);
   logLnkQueueIndex($link_queue_pt);
   
   &clearProgressBar();
+  &dumpLinksCrawled($link_queue_pt);
   &writeSummary($link_queue_pt);
 }
 
@@ -816,7 +887,6 @@ sub recordLinkFound() {
     }
   }
 }
-
 
 
 sub dumpLinksCrawled() {
@@ -897,17 +967,17 @@ sub writeTime() {
 # $response->content_type() can be:
 # text/html, image/jpeg, image/gif, application/msword etc.
 #
-sub getUrl_deprecated() {
-  my ($url, $browser) = @_;
-  my $request = HTTP::Request->new(GET => $url);
-  my $response = $browser->request($request);
-  if ($response->is_error()) {
-    output( "getUrl error: " . $response->status_line . " -> URL: " . $url);
-    return "";
-  }
-  #print "$url: content type: " . $response->content_type() . "\n";
-  return $response->content();
-}
+#sub getUrl_deprecated() {
+#  my ($url, $browser) = @_;
+#  my $request = HTTP::Request->new(GET => $url);
+#  my $response = $browser->request($request);
+#  if ($response->is_error()) {
+#    output( "getUrl error: " . $response->status_line . " -> URL: " . $url);
+#    return "";
+#  }
+#  #print "$url: content type: " . $response->content_type() . "\n";
+#  return $response->content();
+#}
 
 
 #
@@ -1030,22 +1100,13 @@ sub parseLinks() {
 # 
 sub linkIsCrawled() {
   my ($new_link) = @_;
-  if (exists($links_found{$new_link})) { 
+  if (exists($links_found{$new_link}) # file found, may or may not crawled.
+      && $links_found{$new_link} > 0  # text/html file, found but not crawled.
+      ) { 
     #print "link has been visited: $new_link\n";
     return 1; 
   }
   return 0;
-	
-  
-  #foreach my $link (@link_queue) {
-  #  if ($new_link eq $link) { return 1; }
-  #}
- 
-  #foreach my $link (@non_link_queue) {
-  #  if ($new_link eq $link) { return 1; }
-  #}
-  
-  #return 0;
 }
 
 
@@ -1055,6 +1116,7 @@ sub linkIsCrawled() {
 sub isInsideDomain() {
   my ($link) = @_;
   if ($link =~ /^$url_root/i) { return 1; }
+  #return 1;
   return 0;
 }
 
@@ -1402,13 +1464,52 @@ sub logLnkQueueIndex() {
   LOG_Lnk_Queue_Index->autoflush;
 }
 
-
+sub logLastUrlStart() {
+   my $file = &getLastUrlStartLog();
+   open FILE, "> $file" or die "Cannot open file to save: $file";
+   print FILE ($url_start);
+   close FILE;
+}
 
 
 ######################################################
 # Change log
 ######################################################
-# 7/19/2014
+# 7/22/2014
+# - added support such that a session starting from different url_start 
+#   can avoid crawling processed pages of previous sessions.
+#   It does this by checking .pcraw_lnk_found.log, if a text/html file's
+#   hash value is positive, then it's already processed.
+#   Note: if the needed file mime type is different, then this won't work.
+#   Say a first session downloaded text files only, the second session
+#   want images, then it does not know this difference, and will not
+#   processed crawled page. The possible fix is to add mime type to
+#   the log, but that's unnecessarily complex at this time.
+#
+# - added log .pcraw_last_url_start.log, about the previous url_start
+#   used. But this is not used in any places yet, so just for information.
+#
+# = So, the current log structure is:
+#   - shared logs: 
+#     - .pcraw_lnk_found.log : only all links found, and whether crawled
+#       (hash absolute value is crawl depth, + means crawled/processed,
+#        - means not crawled yet)
+#     - .pcraw_last_url_start.log : previous url_start value. No use otherwise.
+#   - logs for each download session:
+#     - .pcraw_[filename]_lnk_Q.log : html links in the queue, to be crawled.
+#     - .pcraw_[filename]_lnk_Q_ID.log: pointer/index in current lnk_Q.
+# = Current behavior:
+#   - The user can stop a download session by Ctrl-C.
+#   - The user can resume a download session from the broken point.
+#   - The user can start from a different url_start under the same url_root,
+#     the download will avoid processing crawled html files.
+#   - For each download session, at least one of url_root and url_start 
+#     must be provided. url_root should be a prefix of url_start.
+#     If url_start is missing, it is assigned the value of url_root;
+#     If url_root is missing, it is assigned the domain name part of url_start.
+#     But a url_root can contain sub path, as long as it is a prefix of url_start.
+#
+# 7/21/2014
 # - added cookie support
 # - added browser agent simulation (firefox)
 # - added hash %links_found.

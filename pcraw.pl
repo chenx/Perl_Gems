@@ -274,12 +274,6 @@ MAIN: if (1) {
 
 sub getUrlRootFromUrlStart() {
   my $f = &getDomain($url_start);
-  #$url_start;
-  #$f =~ s/^http:\/\///i; # remove "http://".
-  #my $index = index($f, "/");
-  #if ($index >= 0) {
-  #  $f = substr($f, 0, $index);
-  #}
   $f = "http://$f/";
   #print "url_root: $f\n";
   return $f;
@@ -290,7 +284,6 @@ sub getUrlRootFromUrlStart() {
 #
 sub getDomain() {
   my ($f) = @_;
-  #$f =~ s/^http:\/\///i; # remove "http://".
   $f = &removeHttpHdr($f);
   my $index = index($f, "/");
   if ($index >= 0) {
@@ -575,7 +568,6 @@ sub getLocalRoot() {
   my ($root) = @_;
   if ($DEBUG) { output ("getLocalRoot(): root = $root" ); }
   
-  #if ($root =~ /^http:\/\//i) { $root =~ s/^http:\/\///i; }
   $root = &removeHttpHdr($root);
   if ($root =~ /\/$/) { $root =~ s/\/$//; } # remove trailing "/" if any.
   
@@ -813,23 +805,22 @@ sub doCrawl() {
   my $resource_download_ct = 0;
   my $browser = getBrowser();
   $download_bytes = 0;  # Initialize total download size.
-  #&dumpHash(\%links_found); print "============\n";
   
   while ($link_queue_pt < $link_queue_len) {
     # For testing, only get first $crawl_number number of links.
     if ($crawl_number > 0 && $link_queue_pt >= $crawl_number) { last; } 
     sleep($wait_interval);
 
-    $url = $link_queue[$link_queue_pt];
-    if ($links_found{$url} < 0) {  # should alwasy exist and be true
-      $links_found{$url} = - $links_found{$url}; # record crawl level.
-      #$links_found_ct ++;
-      &logLnkFound("$links_found_ct. $url => $links_found{$url}");            
-    } # set this url as crawled.
+    $url = $link_queue[$link_queue_pt];     # get next url to crawl.    
+    my $cur_url_value = $links_found{$url}; # should alwasy exist and < 0.
+    if ($cur_url_value < 0) { 
+      $cur_url_value = - $cur_url_value;       
+      $links_found{$url} = - $links_found{$url};
+    }    
     
     # Do not crawl more than max levels.
-    if ($crawl_max_level > 0 && ($links_found{$url} > $crawl_max_level)) { last; }
-    
+    if ($crawl_max_level > 0 && ($cur_url_value > $crawl_max_level)) { last; }
+        
     # Otherwise, continue crawl.
     output( "link #" . (1 + $link_queue_pt) . ": $url" );
 
@@ -858,17 +849,18 @@ sub doCrawl() {
       if ( isWantedFile($new_url) ) {
         #print "::$new_url, $content_type, $content_size\n"; 
         if ($content_type =~ /text\/html/i || $content_type eq "") {
-          #print "add to link Q, type: $content_type\n";
-          @link_queue = (@link_queue, $new_url);
+	      if (! exists($links_found{$new_url})) {
+            #print "add to link Q: $new_url, type: $content_type\n";
+            @link_queue = (@link_queue, $new_url);
           
-          $link_queue_len ++; #= @link_queue;
-          logLnkQueue("$link_queue_len. $new_url");
+            $link_queue_len ++; #= @link_queue;
+            logLnkQueue("$link_queue_len. $new_url");
 
-          #if (! exists($links_found{$new_url}) || $links_found{$new_url} < 0) {
-            $links_found{$new_url} = - ( $links_found{$url} + 1 ); # record crawl level.
+            # add found new_url with level, label as not crawled.
+            $links_found{$new_url} = - ( $cur_url_value + 1 );
             $links_found_ct ++;
             &logLnkFound("$links_found_ct. $new_url => $links_found{$new_url}");            
-          #}
+          }
         }
         elsif ( &mimeTypeMatch($content_type) && 
             &fileSizeMatch($content_size) )  { # size: from getFileHeader().
@@ -888,7 +880,7 @@ sub doCrawl() {
       
       #print "::$new_url:: $links_found{$new_url}\n";
       if (! exists($links_found{$new_url})) {
-        $links_found{$new_url} = $links_found{$url} + 1; # record crawl level.
+        $links_found{$new_url} = $cur_url_value + 1; # record crawl level.
         if ($content_type =~ /text\/html/i) { # html files should keep crawlable.
           $links_found{$new_url} = - $links_found{$new_url}; 
         }
@@ -897,7 +889,9 @@ sub doCrawl() {
       }
     } # end of foreach.
     
-    #$links_found{$url} *= -1; # lable this url as has finished crawling.
+    # Set this url as crawled. Do this at this end, so won't lose work. 
+    # If program crashes before this, next re-run will pick up this page.
+    &logLnkFound("$links_found_ct. $url => $links_found{$url}");            
 
     $link_queue_len = @link_queue;
     $link_queue_pt ++;
@@ -1128,9 +1122,10 @@ sub linkIsCrawled() {
   if (exists($links_found{$new_link}) # file found, may or may not crawled.
       && $links_found{$new_link} > 0  # text/html file, found but not crawled.
       ) { 
-    #print "link has been visited: $new_link\n";
+    #print "link has been crawled: $new_link\n";
     return 1; 
   }
+  #print "link has NOT been crawled: $new_link\n";
   return 0;
 }
 
@@ -1408,7 +1403,6 @@ sub getLocalPath() {
   if ($path =~ /^$url_root/i) {
     $path =~ s/^$url_root//i;
   } else { # not under the same $url_root. Should not happen here.
-    #if ($path =~ /^http:\/\//) { $path =~ s/^http:\/\///; } 
     $path = &removeHttpHdr($path);
   }
 
@@ -1436,7 +1430,6 @@ sub getLocalPath_outsideDomain() {
     return $path;
   }
   
-  #$path =~ s/^http:\/\///; # remove "http://".
   $path = &removeHttpHdr($path);
   
   $path = substr($path, 0, length($path) - length($filename));
@@ -1478,7 +1471,6 @@ sub getFilename() {
   my ($path) = @_;
   my $filename = "";
   
-  #if ($path =~ /http:\/\//i) { $path =~ s/http:\/\///i; }
   $path = &removeHttpHdr($path);
   
   my $i = rindex($path, "/");

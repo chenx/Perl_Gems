@@ -2,14 +2,11 @@
 #
 #1111111112222222222333333333344444444445555555555666666666677777777778888888888
 #
-# This perl script downloads all files within domain $url_root to local machine,
-# starting from the page $url_start.
+# This is a web crawler write in Perl.
 #
-# Tested on:
-# - Windows
-# - Linux
-# - Mac
+# Tested on: Windows, Linux, Mac.
 #
+# References:
 # Short introduction to crawling in Perl:
 #     http://www.cs.utk.edu/cs594ipm/perl/crawltut.html
 # LWP: http://search.cpan.org/~gaas/libwww-perl-5.805/lib/LWP.pm
@@ -23,7 +20,7 @@
 #
 # @author: X. Chen
 # @created on: 12/22/2007
-# @last modified: 7/22/2014
+# @last modified: 7/23/2014
 #
 
 
@@ -33,7 +30,7 @@
 
 =head1 NAME 
 
-PCraw. File name is pcraw.pl.
+PCraw
 
 =head1 DESCRIPTION
 
@@ -43,13 +40,17 @@ When used for the first time, it creates a local repository
 ./download/ under the same directory. 
 For each download task, a sub directory derived from the url_root 
 (see below) will be created, and all downloads are stored there. 
-A log file pcraw.log will be created under the same directory.
+
+A log file pcraw.log is created under the same directory.
+
+A cookie file pcrawl_cookie.txt is created under the same directory.
 
 For each download task, at least 2 parameters are needed:
 
-1) url_root. Only files under this url will be downloaded.
-The avoids crawling through the entire web. The user must provide this.
-This can be provided using the -r switch.
+1) url_root. Unless the global crawl option -g or --global-crawl
+is specified, only files under this url will be downloaded.
+This can be provided using the -r switch. If its value is not
+provided, then it uses the domain name part of url_start.
 
 2) url_start. This is the url where the crawling starts from. 
 If its value is not provided, it uses url_root as its value.
@@ -57,9 +58,9 @@ This can be provided using the -u switch.
 
 =head1 SYNOPSIS
 
-Usage: perl pcraw [-dfghilmoprstuvw]
+Usage: perl pcraw.pl [-dfghilmoprstuvw]
 
-For more help on usage, type: perl pcraw -h 
+For more help on usage, type: perl pcraw.pl -h 
 
 =head1 LICENSE
 
@@ -92,7 +93,6 @@ package XC;
 ######################################################
 
 use strict; 
-use LWP::Simple;
 use LWP::UserAgent;
 use LWP::Protocol::http; # to remove TE header.
 use HTTP::Cookies;
@@ -112,6 +112,7 @@ $|++;             # For printing progress bar in getUrl().
 ######################################################
 
 my $DEBUG = 0;          # Print debug information.
+my $browser;            # Browser, initialized at doCrawl() start.
 my $local_repos = "./download/"; # Local storage repository directory.
 my $local_root = "";    # Local root directory for a download task.
 my $url_root = "";      # Only files under this root will be downloaded.
@@ -134,11 +135,11 @@ my $file_min_size = 0;  # Min file size to download.
 my $file_max_size = 0;  # Max file size to download. 0 means infinite.
 my $wait_interval = 1;  # Wait time (seconds) before crawl next page. Be nice.
 my $flat_localpath = 0; # Use only one level of sub-directory locally.
-my $use_cookie = 1;
-my $use_agent_firefox = 1;
+my $use_agent_firefox = 1; # Simulate firefox browser in header
+my $use_cookie = 1;     # Use cookie.
+my $cookie_file = "pcrawl_cookie.txt"; # Cookie file.
 my $overwrite = 0;      # Overwrite previous download result.
 my $global_crawl = 0;   # If 1, allow crawl outside $url_root.
-
 
 #
 # Some non-text files (such as images) are not under $url_root. 
@@ -234,8 +235,9 @@ MAIN: if (1) {
   #$url_start = "http://";
   
   if ($url_root eq "" && $url_start eq "") {
-    print ("\nError: url_root is not provided. exit.\n");
-    &showUsage();
+    print ("\nError: url_root is not provided. Abort.\n");
+    print ("For usage, type: perl $0 -h\n");
+    #&showUsage();
     exit(0);
   }
   
@@ -417,7 +419,7 @@ sub getPosInt() {
 sub showUsage() {
   my $usage = <<"END_USAGE"; 
 
-Usage: perl $0 $OPT_URL_ROOT_S <url_root> [-dfghilmoprstuvw]
+Usage: perl $0 $OPT_URL_START_S <url_start> [$OPT_URL_ROOT_S <url_root>] [-dfghilmoprstuvw]
 
   Options (short format):
     -d: debug, print debug information.
@@ -479,15 +481,16 @@ Usage: perl $0 $OPT_URL_ROOT_S <url_root> [-dfghilmoprstuvw]
   If an url contains special characters, like space or '&', then
   it should be enclosed with double quotes to work.
 
+  To see perldoc document, type: perldoc $0
+  
   Examples:
     perl $0 -h
     perl $0 -r http://a.com 
+    perl $0 -u http://a.com/index.html
     perl $0 -r http://a.com -u http://a.com/about.html
     perl $0 --url-root http://a.com 
     perl $0 --url-root http://a.com --url-start http://a.com/
-    perl $0 --url-root http://a.com -n 1 -m 2 -o -f --min-size 30000
-    
-  To see perldoc document, type: perldoc $0
+    perl $0 --url-root http://a.com -n 1 -m 2 -i -f --min-size 30000
   
 END_USAGE
 
@@ -499,7 +502,7 @@ END_USAGE
 # Version information of this program.
 #
 sub showVersion() {
-  print "\n$0 version 1.0\n";
+  print "\nPcraw version 1.0\n";
 }
 
 
@@ -612,14 +615,6 @@ sub getSite() {
     output ("Local root $local_root is created");
     output ("");
   }
-
-  #if (0 && ! isWantedFile($url_start) ) {
-  #  $url_start .= "/"; # url_start is a directory, not a file.
-  #  if (! isWantedFile($url_start) ) { 
-  #    print "Abort. Invalid url_start: $url_start\n";
-  #    return;
-  #  }
-  #}
   
   my $history_exist = &getCrawlHistory();
   
@@ -744,7 +739,7 @@ sub getBrowser() {
   # perl pcraw.pl -r http://10.24.7.16 -u http://10.24.7.16:9000/test
   if ($use_cookie) {
     my $cookie_jar = HTTP::Cookies->new(
-      file => '.pcrawl_cookie.txt',
+      file => "$cookie_file",
       autosave => 1,
       ignore_discard => 1,
     );
@@ -803,13 +798,12 @@ sub getBrowser() {
 sub doCrawl() {
   my $link_queue_len = @link_queue; 
   my $resource_download_ct = 0;
-  my $browser = getBrowser();
+  $browser = getBrowser();
   $download_bytes = 0;  # Initialize total download size.
   
   while ($link_queue_pt < $link_queue_len) {
     # For testing, only get first $crawl_number number of links.
     if ($crawl_number > 0 && $link_queue_pt >= $crawl_number) { last; } 
-    sleep($wait_interval);
 
     $url = $link_queue[$link_queue_pt];     # get next url to crawl.    
     my $cur_url_value = $links_found{$url}; # should alwasy exist and < 0.
@@ -824,8 +818,13 @@ sub doCrawl() {
     # Otherwise, continue crawl.
     output( "link #" . (1 + $link_queue_pt) . ": $url" );
 
+    # No longer get content type/size at the beginning of getUrl(), to save
+    # one head request per file. Anyways, type is always "text/html" here,
+    # and the file is always downloaded no matter what the size is.
+    $content_size = -1;
+    $content_type = "text/html";
     $contents = &getUrl($url, $browser);
-    my $content_len = length($contents);
+    my $content_len = length($contents); 
     
     if ($content_len <= 0) { # if == 0, then may be "403 Access Forbidden".
       $link_queue_pt ++;
@@ -842,10 +841,11 @@ sub doCrawl() {
 
     foreach my $new_url (@new_urls) {
       # Remove link anchor like in "http://a.com/a.html#section_1".
-      if ($new_url =~ /#[a-z0-9\-\_\%]*$/i) { 
-        $new_url =~ s/#[a-z0-9\-\_\%]*$//i;
+      if ($new_url =~ /\#[a-z0-9\-\_\%]*$/i) { 
+        $new_url =~ s/\#[a-z0-9\-\_\%]*$//i;
       }
         
+      # isWantedFile() calls getFileHeader(), and gets type/size for wanted files.
       if ( isWantedFile($new_url) ) {
         #print "::$new_url, $content_type, $content_size\n"; 
         if ($content_type =~ /text\/html/i || $content_type eq "") {
@@ -864,7 +864,7 @@ sub doCrawl() {
         }
         elsif ( &mimeTypeMatch($content_type) && 
             &fileSizeMatch($content_size) )  { # size: from getFileHeader().
-          #print "add to non-link Q, and save\n";
+          #print "add to non-link Q, and save: $new_url\n";
           $resource_download_ct += 1;
           output ("file #$resource_download_ct: $new_url");
           @non_link_queue = (@non_link_queue, $new_url);
@@ -873,9 +873,12 @@ sub doCrawl() {
           &saveContent($new_url, $content, $content_type, $content_len);
           &clearProgressBar();
         }
+        else { 
+          #print "? $new_url\n"; 
+        }
       }
       else {
-        #print "NOT wanted link, disgard: $new_link\n";    
+        #print "NOT wanted link, disgard: $new_url\n";    
       }
       
       #print "::$new_url:: $links_found{$new_url}\n";
@@ -897,9 +900,7 @@ sub doCrawl() {
     $link_queue_pt ++;
     &logLnkQueueIndex($link_queue_pt);
   } # end of while.
-  
-  &logLnkQueueIndex($link_queue_pt);
-  
+    
   &clearProgressBar();
   #&dumpLinksCrawled($link_queue_pt);
   &writeSummary($link_queue_pt);
@@ -1002,17 +1003,17 @@ sub writeTime() {
 
 #
 # Get html content of an url.
+# $content_size is obtained from getFileHeader(),
+# instead of getting it again here. This saves 1 request per page.
 #
 sub getUrl() {
+  sleep($wait_interval); # Be nice, wait before each request.
+  
   my ($url, $browser) = @_;
   $final_data = "";
    
-  my $result = $browser->head($url);
-  my $remote_headers = $result->headers;
-  if ($DEBUG) { print "getUrl(): " . Dumper($remote_headers); }
-  
-  # Most servers return content-length, but not always.
-  $total_size = $remote_headers->content_length // "";
+  $total_size = $content_size // -1;
+  #print "getUrl(): size: $total_size\n";
   
   # now do the downloading.
   my $response = $browser->get($url, ':content_cb' => \&callback );
@@ -1021,7 +1022,7 @@ sub getUrl() {
   #print progressBar(-1,01,25,'='); 
   
   # Keep the progress bar, if desired.
-  if ($verbose && $total_size ne "") { print "\n"; } 
+  if ($verbose && $total_size ne -1) { print "\n"; } 
   return $final_data; # File content.
 }
 
@@ -1053,12 +1054,13 @@ sub callback {
 sub progressBar {
   my ( $got, $total, $width, $char ) = @_;
   $width ||= 25; $char ||= '-'; # "||=": default to if not defined.
-  my $num_width = length ($total);
-    
+
   # Some web servers don't give "content-length" field.
   # In such case don't print progress bar.
-  if ($num_width == 0) { return; }
-    
+  if ($total == -1) { return; }
+
+  my $num_width = length ($total);
+
   #print "got = $got, total = $total\n";    
   if ($got == -1) { 
     # removes the previous print out. 
@@ -1146,14 +1148,28 @@ sub isInsideDomain() {
 #
 # If content_size is not defined, let size be 1, so download 
 # can happen and decide the actual size of the file.
+#
+# Previously use LWP::Simple's head method, now use LWP:UserAgent
+# browser, this unifies agent type. $browser is initialized
+# in doCrawl().
 # 
 sub getFileHeader() {
   my ($link) = @_;
-  ($content_type, $content_size) = head($link); 
-  $content_size ||= 1; # if not defined, let size be 1.
-  if ($DEBUG) {
+
+  my $result = $browser->head($link);
+  my $remote_headers = $result->headers;
+  if ($DEBUG) 
+  { print "getFileHeader(): " . Dumper($remote_headers); }
+  
+  # Most servers return content-length, but not always.
+  $content_size = $remote_headers->content_length // -1;
+  $content_type = $remote_headers->content_type // "";
+  
+  if ($DEBUG) 
+  {
     output ("getFileHeader(): $link type: $content_type, size: $content_size");
   }
+  
 }
 
 
@@ -1252,6 +1268,7 @@ sub mimeTypeMatch() {
 sub fileSizeMatch() {
   my ($content_len) = @_;
   #print "content: $content_len. min=$file_min_size, max=$file_max_size\n";
+  if ($content_len == -1) { return 1; } # Header contains no size, download anyway.
   if ($content_len < $file_min_size) { return 0; }
   if (($file_max_size > 0) && ($content_len > $file_max_size)) { return 0; }
   return 1;
@@ -1265,6 +1282,7 @@ sub saveContent() {
   my ($url, $content, $content_type, $content_len) = @_;
   my $outfile;
   
+  $content_type ||= "";
   if ($verbose) { output( "  Type: $content_type, Size: $content_len" ); }
   if ($content_len <= 0) { return; }
   $download_bytes += $content_len; # public variable for total download size.
@@ -1528,6 +1546,15 @@ sub logLastUrlStart() {
 ######################################################
 # Change log
 ######################################################
+# 7/23/2014
+# - Now in getUrl() no longer calls head() to get content type/size.
+#   Such information are obtained from getFileHeader() which is 
+#   called in isWantedFile(). For text/html files, they are always
+#   downloaded no matter what size is, and type is always "text/html".
+#   This change saves 1 request per file, previously 3 request per file
+#   (2 head, 1 get), now 2 (1 head, 1 get). Also removed LWP:Simple
+#   module, so browser agent is now unified into one.
+#
 # 7/22/2014
 # - added support such that a session starting from different url_start 
 #   can avoid crawling processed pages of previous sessions.

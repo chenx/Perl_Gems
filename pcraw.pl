@@ -2,7 +2,7 @@
 #
 #1111111112222222222333333333344444444445555555555666666666677777777778888888888
 #
-# This is a web crawler write in Perl.
+# A web crawler written in Perl.
 #
 # Tested on: Windows, Linux, Mac.
 #
@@ -74,7 +74,7 @@ APACHE/MIT/BSD/GPL 2.0
 X. Chen <chenx@hawaii.edu>
 
 =item 
-Copyrighted (c) since July, 2014
+Copyright (c) since July, 2014
 
 =back
 

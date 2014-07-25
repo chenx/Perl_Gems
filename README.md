@@ -6,6 +6,7 @@ Useful Perl Scripts.
 pcraw.pl 
 --------
 A web crawler in Perl. Stores crawled files locally. Keeps a log file. Useful for downloading a website.
+This has become an independent project <a href="https://github.com/chenx/PCraw">PCraw</a> since 7/24/2014. New updates will go there.
 
 phttp.pl
 --------

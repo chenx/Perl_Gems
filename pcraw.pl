@@ -10,6 +10,8 @@
 # Short introduction to crawling in Perl:
 #     http://www.cs.utk.edu/cs594ipm/perl/crawltut.html
 # LWP: http://search.cpan.org/~gaas/libwww-perl-5.805/lib/LWP.pm
+# HTTP::Response object: http://lwp.interglacial.com/ch03_05.htm
+# HTTP status code:  http://en.wikipedia.org/wiki/List_of_HTTP_status_codes
 # HTML parser: http://search.cpan.org/dist/HTML-Parser/
 # POSIX: http://search.cpan.org/~rgarcia/perl-5.10.0/ext/POSIX/POSIX.pod
 # POSIX math functions, e.g., floor(), ceil():
@@ -133,13 +135,15 @@ my $verbose = 0;        # If 1, print more details to screen and log.
 my $download_bytes;     # Total bytes of downloaded files.
 my $file_min_size = 0;  # Min file size to download.
 my $file_max_size = 0;  # Max file size to download. 0 means infinite.
-my $wait_interval = 1;  # Wait time (seconds) before crawl next page. Be nice.
+my $crawl_interval = 5; # Wait (seconds) before crawling next html (doCrawl).
+my $wait_interval = 1;  # Wait (seconds) before retrieving next url (getUrl).
 my $flat_localpath = 0; # Use only one level of sub-directory locally.
 my $use_agent_firefox = 1; # Simulate firefox browser in header
 my $use_cookie = 1;     # Use cookie.
 my $cookie_file = "pcrawl_cookie.txt"; # Cookie file.
 my $overwrite = 0;      # Overwrite previous download result.
 my $global_crawl = 0;   # If 1, allow crawl outside $url_root.
+my $referer_default = "http://yahoo.com"; # default referer visiting a page.
 
 #
 # Some non-text files (such as images) are not under $url_root. 
@@ -205,6 +209,8 @@ my $OPT_MIME_TYPE_S = "-m";
 my $OPT_MIME_TYPE_L = "--mime-type";
 my $OPT_WAIT_INTERVAL_S = "-w";
 my $OPT_WAIT_INTERVAL_L = "--wait";
+my $OPT_CRAWL_INTERVAL_S = "-c";
+my $OPT_CRAWL_INTERVAL_L = "--crawl-interval";
 my $OPT_MIN_SIZE_L  = "--min-size";
 my $OPT_MAX_SIZE_L  = "--max-size";
 my $OPT_FLAT_PATH_S = "-f";
@@ -215,9 +221,11 @@ my $OPT_CRAWL_MAX_LEVEL_S = "-l";
 my $OPT_CRAWL_MAX_LEVEL_L = "--level-crawl";
 my $OPT_GLOBAL_CRAWL_S = "-g";
 my $OPT_GLOBAL_CRAWL_L = "--global-crawl";
+my $OPT_DEFAULT_REFERER_S = "-e";
+my $OPT_DEFAULT_REFERER_L = "--referer-default";
 
 #
-# Use by getUrl() function that prints a progress bar.
+# Used by getUrl() function that prints a progress bar.
 #
 my $total_size; # Total size of a file to download.
 my $final_data; # The content of a downloaded file.
@@ -321,8 +329,14 @@ sub getOptions() {
     elsif ($a eq $OPT_WAIT_INTERVAL_S || $a eq $OPT_WAIT_INTERVAL_L) {
       $state = $OPT_WAIT_INTERVAL_S;
     }
+    elsif ($a eq $OPT_CRAWL_INTERVAL_S || $a eq $OPT_CRAWL_INTERVAL_L) {
+      $state = $OPT_CRAWL_INTERVAL_S;
+    }
     elsif ($a eq $OPT_CRAWL_MAX_LEVEL_S || $a eq $OPT_CRAWL_MAX_LEVEL_L) {
       $state = $OPT_CRAWL_MAX_LEVEL_S;
+    }
+    elsif ($a eq $OPT_DEFAULT_REFERER_S || $a eq $OPT_DEFAULT_REFERER_L) {
+      $state = $OPT_DEFAULT_REFERER_S;
     }
     elsif ($a eq $OPT_MIN_SIZE_L) {
       $state = $OPT_MIN_SIZE_L;
@@ -384,6 +398,9 @@ sub getOptions() {
     elsif ($state eq $OPT_WAIT_INTERVAL_S) {
       $wait_interval = getPosInt($a); $state = "";
     }
+    elsif ($state eq $OPT_CRAWL_INTERVAL_S) {
+      $crawl_interval = getPosInt($a); $state = "";
+    }
     elsif ($state eq $OPT_MIN_SIZE_L) {
       $file_min_size = getPosInt($a); $state = "";    
     }
@@ -392,6 +409,9 @@ sub getOptions() {
     }
     elsif ($state eq $OPT_CRAWL_MAX_LEVEL_S) {
       $crawl_max_level = getPosInt($a); $state = "";
+    }
+    elsif ($state eq $OPT_DEFAULT_REFERER_S) {
+      $referer_default = $a; $state = "";
     }
 
     else { 
@@ -422,6 +442,7 @@ sub showUsage() {
 Usage: perl $0 $OPT_URL_START_S <url_start> [$OPT_URL_ROOT_S <url_root>] [-dfghilmoprstuvw]
 
   Options (short format):
+    -c: wait time (seconds) before crawling next html page.
     -d: debug, print debug information.
     -f: use flat local path: only one level under local root.
     -g: allow global crawl outside url_root.
@@ -453,7 +474,9 @@ Usage: perl $0 $OPT_URL_START_S <url_start> [$OPT_URL_ROOT_S <url_root>] [-dfghi
     -u <url_start>: start url.
         This is where a crawling task starts from.
     -v: show version information.
-    -w: wait time before crawl next page, in second.
+    -w: wait time (seconds) before getting next url. Difference of this 
+        with -c is: on each html page, there can be several urls. -c is
+        for each html page, -w is for each url.
 
   Options (long format):
     --debug: same as -d
@@ -546,7 +569,7 @@ sub getQueueLogName() {
   $name =~ s/^$url_root//;
   $name = encodePath($name);
   $name =~ s/[\/\.]/_/g; # replace all "/" and "." with "_".
-  return $name;	
+  return $name;    
 }
 
 #
@@ -734,7 +757,7 @@ sub getBrowser() {
   push(@LWP::Protocol::http::EXTRA_SOCK_OPTS, SendTE=>0);
   my $browser = LWP::UserAgent->new(keep_alive=>1);
   $browser->timeout(10);
-	
+    
   # Use cookie.
   # perl pcraw.pl -r http://10.24.7.16 -u http://10.24.7.16:9000/test
   if ($use_cookie) {
@@ -798,12 +821,16 @@ sub getBrowser() {
 sub doCrawl() {
   my $link_queue_len = @link_queue; 
   my $resource_download_ct = 0;
+  my %referers;
   $browser = getBrowser();
   $download_bytes = 0;  # Initialize total download size.
   
   while ($link_queue_pt < $link_queue_len) {
     # For testing, only get first $crawl_number number of links.
     if ($crawl_number > 0 && $link_queue_pt >= $crawl_number) { last; } 
+    print ("wait for $crawl_interval seconds ...                   \r");
+    sleep($crawl_interval);
+    print ("                        \r"); # clear the previous message.
 
     $url = $link_queue[$link_queue_pt];     # get next url to crawl.    
     my $cur_url_value = $links_found{$url}; # should alwasy exist and < 0.
@@ -823,11 +850,12 @@ sub doCrawl() {
     # and the file is always downloaded no matter what the size is.
     $content_size = -1;
     $content_type = "text/html";
-    $contents = &getUrl($url, $browser);
+    $contents = &getUrl($url, $browser, $referers{$url} // $referer_default);
     my $content_len = length($contents); 
     
     if ($content_len <= 0) { # if == 0, then may be "403 Access Forbidden".
       $link_queue_pt ++;
+      &logLnkQueueIndex($link_queue_pt);
       next;
     }
 
@@ -844,17 +872,18 @@ sub doCrawl() {
       if ($new_url =~ /\#[a-z0-9\-\_\%]*$/i) { 
         $new_url =~ s/\#[a-z0-9\-\_\%]*$//i;
       }
-        
+
       # isWantedFile() calls getFileHeader(), and gets type/size for wanted files.
-      if ( isWantedFile($new_url) ) {
+      if ( isWantedFile($new_url, $url) ) {
         #print "::$new_url, $content_type, $content_size\n"; 
         if ($content_type =~ /text\/html/i || $content_type eq "") {
-	      if (! exists($links_found{$new_url})) {
+          if (! exists($links_found{$new_url})) {
             #print "add to link Q: $new_url, type: $content_type\n";
             @link_queue = (@link_queue, $new_url);
           
             $link_queue_len ++; #= @link_queue;
             logLnkQueue("$link_queue_len. $new_url");
+            $referers{$new_url} = $url; # record referer of page $new_url.
 
             # add found new_url with level, label as not crawled.
             $links_found{$new_url} = - ( $cur_url_value + 1 );
@@ -868,7 +897,7 @@ sub doCrawl() {
           $resource_download_ct += 1;
           output ("file #$resource_download_ct: $new_url");
           @non_link_queue = (@non_link_queue, $new_url);
-          my $content = &getUrl($new_url, $browser);            
+          my $content = &getUrl($new_url, $browser, $url);            
           my $content_len = length($content);
           &saveContent($new_url, $content, $content_type, $content_len);
           &clearProgressBar();
@@ -879,6 +908,7 @@ sub doCrawl() {
       }
       else {
         #print "NOT wanted link, disgard: $new_url\n";    
+        #print "::$new_url, $content_type, $content_size\n";
       }
       
       #print "::$new_url:: $links_found{$new_url}\n";
@@ -1009,14 +1039,19 @@ sub writeTime() {
 sub getUrl() {
   sleep($wait_interval); # Be nice, wait before each request.
   
-  my ($url, $browser) = @_;
+  my ($url, $browser, $referer) = @_;
   $final_data = "";
    
   $total_size = $content_size // -1;
   #print "getUrl(): size: $total_size\n";
   
   # now do the downloading.
-  my $response = $browser->get($url, ':content_cb' => \&callback );
+  my $request = new HTTP::Request('GET', "$url");
+  if ($referer ne "") { $request->referer("$referer"); }
+  my $response = $browser->request($request, \&callback, 4096);
+
+  # Replaced with the code above using referer.
+  #my $response = $browser->get($url, ':content_cb' => \&callback );
   
   # Don't clear row here, it's too soon. Clear in function doCrawl().
   #print progressBar(-1,01,25,'='); 
@@ -1091,6 +1126,8 @@ sub clearProgressBar() {
 
 
 #
+# Note that LinkExtor parses both <a> and <img>.
+#
 # $$link[i]: valid values for i: 0 (tag name), 1(attribute name), 2(link value)
 # e.g.: <img src='http://127.0.0.1/index.html'>
 # Here $$link[0] = img, $$link[1] = src, $$link[2] = http://127.0.0.1/index.html
@@ -1098,6 +1135,8 @@ sub clearProgressBar() {
 sub parseLinks() {
   my ($url, $contents) = @_;
   my ($page_parser) = HTML::LinkExtor->new(undef, $url);
+
+  $contents = &getCustomLinks($contents);
 
   # This would have the warning:
   # "Parsing of undecoded UTF-8 will give garbage when decoding entities".
@@ -1146,17 +1185,62 @@ sub isInsideDomain() {
 #
 # Get file type and size.
 #
-# If content_size is not defined, let size be 1, so download 
-# can happen and decide the actual size of the file.
+# If content_size is not defined, let size be -1.
+# If $result->is_error() is true, code may be 404 (not found), 
+# 403 (forbidden), 500 (internal server error) etc.
 #
-# Previously use LWP::Simple's head method, now use LWP:UserAgent
-# browser, this unifies agent type. $browser is initialized
-# in doCrawl().
+# HTTP::Response object: http://lwp.interglacial.com/ch03_05.htm
 # 
 sub getFileHeader() {
-  my ($link) = @_;
+  my ($link, $referer) = @_;
 
-  my $result = $browser->head($link);
+  my $request = new HTTP::Request('HEAD', "$link");
+  if ($referer ne "") { $request->referer("$referer"); }
+  my $result = $browser->request($request);
+  
+  # Replaced with the above code using referer.  
+  #my $result = $browser->head($link);
+  
+  if (0) {
+    print "status line: " . $result->status_line() . "\n";
+    print "status code: " . $result->code() . "\n";
+    print "status msg: " . $result->message() . "\n";
+    print "status is_error: " . $result->is_error() . "\n";
+    print "status is_success: " . $result->is_success() . "\n";
+    print "status is_info: " . $result->is_info() . "\n";
+    print "status is_redirect: " . $result->is_redirect() . "\n";
+    print "header('Location'): " . $result->request->uri . "\n";
+    print "status last_modified: " . 
+          getLocaltime( $result->last_modified() ) . "\n";
+    print "status encoding: " . ($result->content_encoding() // "") . "\n";
+    print "status language: " . ($result->content_language() // "") . "\n";
+    print "status current_age: " . $result->current_age() . "\n";     # seconds
+    print "status lifetime: " . $result->freshness_lifetime() . "\n"; # seconds 
+    print "status is_fresh: " . $result->is_fresh() . "\n";
+    print "status fresh_until: " . 
+          getLocaltime( $result->fresh_until() ) . "\n";
+    print "status base: " . $result->base() . "\n";
+    print Dumper($result->headers);
+    exit(0);
+  }
+  
+  if ($result->is_error()) {
+    if ($DEBUG) { print "error ($link): code = " . $result->code() . "\n"; }
+    return 0;
+  }
+  # It seems page redirection is handled automatically.
+  # E.g., in php, <?php header(Localtion: x.html); ?>, 
+  # then content of x.html is actually obtained in getUrl().
+  #
+  # http://bytes.com/topic/asp-classic/answers/506941-how-handle-
+  # webpage-redirection-lwp-perl
+  #elsif ($result->is_redirect()) {
+  #  print "redirect to: " . $result->headers->location .  "\n";
+  #  print $result->as_string . "\n";
+  #  exit(0);
+  #  return 0; # do not handle 302 redirect yet.
+  #}
+
   my $remote_headers = $result->headers;
   if ($DEBUG) 
   { print "getFileHeader(): " . Dumper($remote_headers); }
@@ -1170,6 +1254,14 @@ sub getFileHeader() {
     output ("getFileHeader(): $link type: $content_type, size: $content_size");
   }
   
+  return 1;
+}
+
+
+sub getLocaltime() {
+  my ($t) = @_;
+  if ($t eq "") { return ""; }
+  return scalar(localtime($t));
 }
 
 
@@ -1181,18 +1273,16 @@ sub getFileHeader() {
 # The list obiously is incomplete.
 #
 sub isWantedFile() {
-  my ($link) = @_;
+  my ($link, $referer) = @_;
+
+  $content_type = "";
+  $content_size = 0;
 
   if (&linkIsCrawled($link)) { return 0; }
   if ($static_page_only && $link =~ /\?(\S+=\S*)+$/i) { return 0; }
 
-  &getFileHeader($link);
-  
-  #if (undef == $content_type) { $content_type = ""; }
-  # Other ways to write this:
-  #$content_type ||= ""; // if not defined, let content_type by empty string.
-  $content_type = ($content_type // "");
-  
+  if (! &getFileHeader($link, $referer)) { return 0; }
+    
   # Must use () around the regex expression to get correct precedence.
   if ($plain_txt_only && ! ($content_type =~ /^text\//i)) { return 0; }
 
@@ -1286,7 +1376,6 @@ sub saveContent() {
   if ($verbose) { output( "  Type: $content_type, Size: $content_len" ); }
   if ($content_len <= 0) { return; }
   $download_bytes += $content_len; # public variable for total download size.
-
               
   my $filename = getFilename($url);
   #print "saveContent(). url = $url, filename = $filename\n"  ;
@@ -1541,11 +1630,36 @@ sub logLastUrlStart() {
 }
 
 
+#
+# This function is used by parseLinks().
+# Add any customized links here. 
+#
+sub getCustomLinks() {
+  my ($s) = @_;
+  #return $s;
+  
+  # In some pages, <img data-original="..."> should be <img src="...">
+  if ($s =~ m/data\-original/i) {
+    #print "replace data-original: $url\n";
+    $s =~ s/data\-original/src/gi; # for <img />
+  }
+  
+  return $s;
+}
+
+
 
 
 ######################################################
 # Change log
 ######################################################
+# 7/24/2014
+# - Now in getFileHeader(), can get all response fields.
+#   Use is_error(), in that case return 0, so isWantedFile()
+#   returns false.
+# - Added function getCustomLinks(), to handle non-standard
+#   things, such as jquery lazy loading contents.
+#
 # 7/23/2014
 # - Now in getUrl() no longer calls head() to get content type/size.
 #   Such information are obtained from getFileHeader() which is 
@@ -1554,6 +1668,10 @@ sub logLastUrlStart() {
 #   This change saves 1 request per file, previously 3 request per file
 #   (2 head, 1 get), now 2 (1 head, 1 get). Also removed LWP:Simple
 #   module, so browser agent is now unified into one.
+# - Now added referer to head and get requests.
+# - Now wait for 5 seconds before requesting another html file,
+#   and wait for 1 second before requesting another link on the file.
+#   This way it's nice and won't get remote server reject request.
 #
 # 7/22/2014
 # - added support such that a session starting from different url_start 

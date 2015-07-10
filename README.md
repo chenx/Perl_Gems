@@ -3,6 +3,10 @@ Perl_Gems
 
 Useful Perl Scripts.
 
+count.txt
+--------
+Examples of using Perl to count number of occurrences in string.
+
 pcraw.pl 
 --------
 A web crawler in Perl. Stores crawled files locally. Keeps a log file. Useful for downloading a website.

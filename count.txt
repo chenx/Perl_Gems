@@ -1,0 +1,10 @@
+Perl - count number of occurrences
+http://www.chengfu.net/2005/10/count-occurrences-perl/
+
+The author wants to find out what's the fastest way of counting occurrences of a string in a text. e.g. '-' in “1-4-7-8-37-5-7-8-3-42″. He gives 5 ways of doing this:
+
+1. my $size = (scalar(@{[$string =~ /-/g]}) + 1);
+2. my $size = scalar(split /-/, $string);
+3. my $size = (($string =~ s/-//g) + 1);
+4. my $size = (($string =~ tr/-//) + 1);
+5. my $size = 1; $size++ while $string =~ /-/g;
